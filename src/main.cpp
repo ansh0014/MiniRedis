@@ -16,7 +16,6 @@ using namespace std;
 unordered_map<string, string> store;
 mutex storeMutex;
 
-// trim helper
 string trim(const string &s) {
     size_t start = s.find_first_not_of(" \r\n\t");
     size_t end = s.find_last_not_of(" \r\n\t");
@@ -24,15 +23,15 @@ string trim(const string &s) {
     return s.substr(start, end - start + 1);
 }
 
-// handle each client in a separate thread
+
 void handleClient(SOCKET clientSock, string clientIP) {
-    cout << "[+] Connected: " << clientIP << endl;
+    cout << "Connected: " << clientIP << endl;
     char buf[1024];
 
     while (true) {
         int bytesReceived = recv(clientSock, buf, sizeof(buf) - 1, 0);
         if (bytesReceived <= 0) {
-            cout << "[-] Disconnected: " << clientIP << endl;
+            cout << " Disconnected: " << clientIP << endl;
             closesocket(clientSock);
             return;
         }
@@ -144,52 +143,3 @@ int main() {
     return 0;
 }
 
-
-// std:: cerr() is standard output stream in C++ used to pring error messages to the console.
-// it is part of isosteam library
-// thie program windows networking (Winsock)program
-// WSADATA wsa;
-/*
-this declared a variable of type WSADATA
-it's a structure (defined by windows ) that store information about the windows
-Sockets(Winsock ) implemetation on you sytem.
-lets take example
-think of it as "status card" where windows fills in details like:
-which Winsock version running
-supported freature(TCP, UDP , etc)
-system limits of capabilities.
-typedef struct WSAData{
-WORD wVersion;       // version of Winsock that was requested
-WORD wHighVersion;   // Highest version supported
-char szDescription[257];
-char szSystemstatus[129];
-//  other fields
-}
-WSAStartup(MAKEWORD(2,2), &wsa)
-This is the intialization fucnitonf for th winsock library.
-winsock=the windows API for network programming(TCP/IP)
-before you can use any netword fucntion like socket(), bind(), accept(), etc.
-you must first initialize Winsock with WSAStartup.
-lets understand its two parameter:
-a) makeword(2,2)
-This is a macro that combines major and minor version numbers into one 16-bit word.
-it means you're requestiong version 2.2 of Winsock API
-so MAKEWORD(2,2) = 0*0202 in hexadecimal
-MAKEWORD(1,1) → requests version 1.1
-MAKEWORD(2,2) → requests version 2.2
-b) &wsa
-this is pointer to uour WSADATA variable
-When WSAStartup runs, it fills that structure with details abot the WinSock version you're actually getting
-why we used WSAStartup() - this is for the window
-for linux / mac you don't use directly call socket() and other fucntion
-WSACleanup();
-to properly release resurces
-| Step | Code                              | Description                                               |
-| ---- | --------------------------------- | --------------------------------------------------------- |
-| 1    | `WSADATA wsa;`                    | Create a struct to store socket info.                     |
-| 2    | `MAKEWORD(2,2)`                   | Request version 2.2 of WinSock.                           |
-| 3    | `WSAStartup(MAKEWORD(2,2), &wsa)` | Load the WinSock DLL and initialize the networking stack. |
-| 4    | Function returns 0                | Success — WinSock is ready to use.                        |
-| 5    | Later: `WSACleanup()`             | Clean up before program exit.                             |
-
-*/
