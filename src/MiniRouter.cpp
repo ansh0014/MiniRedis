@@ -166,6 +166,8 @@ vector<queue<SOCKET>> connPools;
 vector<mutex> poolLocks;
 mutex clientWriteMutex;
 
+
+
 SOCKET getConn(int idx) {
     {
         lock_guard<mutex> lk(poolLocks[idx]);
