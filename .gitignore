@@ -39,5 +39,23 @@
 
 # debug information files
 *.dwo
-.\authkey.txt
-.authkey.txt
+
+# API keys and auth files
+authkey.txt
+apikeys.txt
+**/authkey.txt
+**/apikeys.txt
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.vcxproj*
+*.sln
+
+# Build directories
+build/
+bin/
+
+# OS files
+Thumbs.db
+.DS_Store
