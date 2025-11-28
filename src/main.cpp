@@ -1,4 +1,5 @@
-// main.cpp
+
+
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
@@ -9,282 +10,306 @@
 #include <algorithm>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
+#include <queue>
 #include <vector>
-#include <cctype>
+#include <chrono>
+#include <atomic>
 
-using namespace std;
 #pragma comment(lib, "Ws2_32.lib")
+using namespace std;
+using SteadyClock = chrono::steady_clock;
+using TimePoint = chrono::time_point<SteadyClock>;
 
-unordered_map<string, string> store;
-mutex storeMutex;
-
-int SLOT_START = 0;
-int SLOT_END = 16383;
-string NODE_ADDR = "127.0.0.1";
+// Defaults (can be overridden via args)
 int NODE_PORT = 6379;
+string NODE_ADDR = "127.0.0.1";
+size_t MEMORY_LIMIT_BYTES = 40 * 1024 * 1024; // 40 MB default
+int WORKER_COUNT = 4;
+int REQUEST_QUEUE_CAPACITY = 1024;
+
+struct ValueEntry {
+    string value;
+    TimePoint expiry;
+    size_t bytes; 
+};
+
+unordered_map<string, ValueEntry> store;
+mutex storeMutex;
+atomic<size_t> memUsedBytes(0);
+const size_t ENTRY_OVERHEAD = 64;
+
+struct ClientRequest { SOCKET clientSock; string raw; };
 
 
-static const unsigned short crc16tab[256] = {
-    0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50A5, 0x60C6, 0x70E7,
-    0x8108, 0x9129, 0xA14A, 0xB16B, 0xC18C, 0xD1AD, 0xE1CE, 0xF1EF,
-    0x1231, 0x0210, 0x3273, 0x2252, 0x52B5, 0x4294, 0x72F7, 0x62D6,
-    0x9339, 0x8318, 0xB37B, 0xA35A, 0xD3BD, 0xC39C, 0xF3FF, 0xE3DE,
-    0x2462, 0x3443, 0x0420, 0x1401, 0x64E6, 0x74C7, 0x44A4, 0x5485,
-    0xA56A, 0xB54B, 0x8528, 0x9509, 0xE5EE, 0xF5CF, 0xC5AC, 0xD58D,
-    0x3653, 0x2672, 0x1611, 0x0630, 0x76D7, 0x66F6, 0x5695, 0x46B4,
-    0xB75B, 0xA77A, 0x9719, 0x8738, 0xF7DF, 0xE7FE, 0xD79D, 0xC7BC,
-    0x48C4, 0x58E5, 0x6886, 0x78A7, 0x0840, 0x1861, 0x2802, 0x3823,
-    0xC9CC, 0xD9ED, 0xE98E, 0xF9AF, 0x8948, 0x9969, 0xA90A, 0xB92B,
-    0x5AF5, 0x4AD4, 0x7AB7, 0x6A96, 0x1A71, 0x0A50, 0x3A33, 0x2A12,
-    0xDBFD, 0xCBDC, 0xFBBF, 0xEB9E, 0x9B79, 0x8B58, 0xBB3B, 0xAB1A,
-    0x6CA6, 0x7C87, 0x4CE4, 0x5CC5, 0x2C22, 0x3C03, 0x0C60, 0x1C41,
-    0xEDAE, 0xFD8F, 0xCDEC, 0xDDCD, 0xAD2A, 0xBD0B, 0x8D68, 0x9D49,
-    0x7E97, 0x6EB6, 0x5ED5, 0x4EF4, 0x3E13, 0x2E32, 0x1E51, 0x0E70,
-    0xFF9F, 0xEFBE, 0xDFDD, 0xCFFC, 0xBF1B, 0xAF3A, 0x9F59, 0x8F78,
-    0x9188, 0x81A9, 0xB1CA, 0xA1EB, 0xD10C, 0xC12D, 0xF14E, 0xE16F,
-    0x1080, 0x00A1, 0x30C2, 0x20E3, 0x5004, 0x4025, 0x7046, 0x6067,
-    0x83B9, 0x9398, 0xA3FB, 0xB3DA, 0xC33D, 0xD31C, 0xE37F, 0xF35E,
-    0x02B1, 0x1290, 0x22F3, 0x32D2, 0x4235, 0x5214, 0x6277, 0x7256,
-    0xB5EA, 0xA5CB, 0x95A8, 0x8589, 0xF56E, 0xE54F, 0xD52C, 0xC50D,
-    0x34E2, 0x24C3, 0x14A0, 0x0481, 0x7466, 0x6447, 0x5424, 0x4405,
-    0xA7DB, 0xB7FA, 0x8799, 0x97B8, 0xE75F, 0xF77E, 0xC71D, 0xD73C,
-    0x26D3, 0x36F2, 0x0691, 0x16B0, 0x6657, 0x7676, 0x4615, 0x5634,
-    0xD94C, 0xC96D, 0xF90E, 0xE92F, 0x99C8, 0x89E9, 0xB98A, 0xA9AB,
-    0x5844, 0x4865, 0x7806, 0x6827, 0x18C0, 0x08E1, 0x3882, 0x28A3,
-    0xCB7D, 0xDB5C, 0xEB3F, 0xFB1E, 0x8BF9, 0x9BD8, 0xABBB, 0xBB9A,
-    0x4A75, 0x5A54, 0x6A37, 0x7A16, 0x0AF1, 0x1AD0, 0x2AB3, 0x3A92,
-    0xFD2E, 0xED0F, 0xDD6C, 0xCD4D, 0xBDAA, 0xAD8B, 0x9DE8, 0x8DC9,
-    0x7C26, 0x6C07, 0x5C64, 0x4C45, 0x3CA2, 0x2C83, 0x1CE0, 0x0CC1,
-    0xEF1F, 0xFF3E, 0xCF5D, 0xDF7C, 0xAF9B, 0xBFBA, 0x8FD9, 0x9FF8,
-    0x6E17, 0x7E36, 0x4E55, 0x5E74, 0x2E93, 0x3EB2, 0x0ED1, 0x1EF0};
+queue<ClientRequest> reqQueue;
+mutex reqMutex;
+condition_variable reqCv;
+atomic<bool> shuttingDown(false);
 
-unsigned short crc16(const unsigned char *buf, int len)
-{
-    unsigned short crc = 0;
-    for (int i = 0; i < len; ++i)
-    {
-        crc = (unsigned short)((crc << 8) ^ crc16tab[((crc >> 8) ^ buf[i]) & 0x00FF]);
-    }
-    return crc;
+// expiry heap
+struct ExpiryItem {
+    TimePoint expiry;
+    string key;
+    bool operator>(const ExpiryItem &o) const { return expiry > o.expiry; }
+};
+priority_queue<ExpiryItem, vector<ExpiryItem>, greater<ExpiryItem>> expiryHeap;
+mutex expiryMutex;
+condition_variable expiryCv;
+
+string trim(const string &s) {
+    size_t a = s.find_first_not_of(" \r\n\t");
+    if (a==string::npos) return "";
+    size_t b = s.find_last_not_of(" \r\n\t");
+    return s.substr(a, b-a+1);
 }
 
-int keySlot(const string &key)
-{
+void sendStr(SOCKET s, const string &msg) {
+    const char *buf = msg.c_str();
+    int len = (int)msg.size();
+    int sent = 0;
+    while (sent < len) {
+        int r = send(s, buf + sent, len - sent, 0);
+        if (r == SOCKET_ERROR || r == 0) break;
+        sent += r;
+    }
+}
 
-    size_t s = key.find('{');
-    if (s != string::npos)
-    {
-        size_t e = key.find('}', s + 1);
-        if (e != string::npos && e > s + 1)
-        {
-            string sub = key.substr(s + 1, e - (s + 1));
-            unsigned short c = crc16((const unsigned char *)sub.data(), (int)sub.size());
-            return c % 16384;
+bool parseInt(const string &s, long long &out) {
+    try {
+        size_t idx;
+        long long v = stoll(s, &idx);
+        if (idx != s.size()) return false;
+        out = v;
+        return true;
+    } catch(...) { return false; }
+}
+
+size_t calcBytes(const string &k, const string &v) { return k.size() + v.size() + ENTRY_OVERHEAD; }
+
+// command handlers
+string handleSET(const string &key, const string &value, const string &opt, const string &optVal) {
+    if (key.empty()) return "-ERR wrong number of arguments for 'SET'\r\n";
+    size_t newBytes = calcBytes(key, value);
+    unique_lock<mutex> lk(storeMutex);
+    auto it = store.find(key);
+    size_t oldBytes = (it!=store.end()) ? it->second.bytes : 0;
+    long long delta = (long long)newBytes - (long long)oldBytes;
+    if (delta > 0 && memUsedBytes + (size_t)delta > MEMORY_LIMIT_BYTES) {
+        return "-ERR memory limit reached\r\n";
+    }
+    ValueEntry e;
+    e.value = value;
+    e.bytes = newBytes;
+    e.expiry = TimePoint{};
+    if (!opt.empty()) {
+        string OPT = opt;
+        transform(OPT.begin(), OPT.end(), OPT.begin(), ::toupper);
+        if (OPT=="EX") {
+            long long sec; if (!parseInt(optVal, sec) || sec<=0) return "-ERR invalid EX value\r\n";
+            e.expiry = SteadyClock::now() + chrono::seconds(sec);
+        } else if (OPT=="PX") {
+            long long ms; if (!parseInt(optVal, ms) || ms<=0) return "-ERR invalid PX value\r\n";
+            e.expiry = SteadyClock::now() + chrono::milliseconds(ms);
         }
     }
-    unsigned short c = crc16((const unsigned char *)key.data(), (int)key.size());
-    return c % 16384;
-}
-
-string trim(const string &s)
-{
-    size_t start = s.find_first_not_of(" \r\n\t");
-    size_t end = s.find_last_not_of(" \r\n\t");
-    if (start == string::npos)
-        return "";
-    return s.substr(start, end - start + 1);
-}
-
-bool ownsSlot(int slot)
-{
-    return slot >= SLOT_START && slot <= SLOT_END;
-}
-
-void sendString(SOCKET sock, const string &s)
-{
-    send(sock, s.c_str(), (int)s.size(), 0);
-}
-
-void handleClient(SOCKET clientSock, string clientIP)
-{
-    cout << "Connected: " << clientIP << "\n";
-    char buf[4096];
-
-    while (true)
-    {
-        int bytesReceived = recv(clientSock, buf, (int)sizeof(buf) - 1, 0);
-        if (bytesReceived <= 0)
+    if (it!=store.end()) {
+        memUsedBytes.fetch_sub(it->second.bytes);
+        it->second = move(e);
+        memUsedBytes.fetch_add(it->second.bytes);
+    } else {
+        store.emplace(key, move(e));
+        memUsedBytes.fetch_add(newBytes);
+    }
+    // schedule expiry
+    if (store[key].expiry != TimePoint{}) {
+        ExpiryItem item{store[key].expiry, key};
         {
-            cout << "Disconnected: " << clientIP << "\n";
-            closesocket(clientSock);
-            return;
+            lock_guard<mutex> lk2(expiryMutex);
+            expiryHeap.push(move(item));
         }
+        expiryCv.notify_one();
+    }
+    return "+OK\r\n";
+}
 
-        buf[bytesReceived] = '\0';
-        string input(buf);
+string handleGET(const string &key) {
+    if (key.empty()) return "-ERR wrong number of arguments for 'GET'\r\n";
+    lock_guard<mutex> lk(storeMutex);
+    auto it = store.find(key);
+    if (it==store.end()) return "$-1\r\n";
+    if (it->second.expiry != TimePoint{} && SteadyClock::now() >= it->second.expiry) {
+        memUsedBytes.fetch_sub(it->second.bytes);
+        store.erase(it);
+        return "$-1\r\n";
+    }
+    const string &v = it->second.value;
+    return "$" + to_string(v.size()) + "\r\n" + v + "\r\n";
+}
 
-        string clean;
-        for (char c : input)
-            if (isprint((unsigned char)c) || isspace((unsigned char)c))
-                clean += c;
+string handleDEL(const string &key) {
+    if (key.empty()) return "-ERR wrong number of arguments for 'DEL'\r\n";
+    lock_guard<mutex> lk(storeMutex);
+    auto it = store.find(key);
+    if (it==store.end()) return ":0\r\n";
+    memUsedBytes.fetch_sub(it->second.bytes);
+    store.erase(it);
+    return ":1\r\n";
+}
 
-        input = trim(clean);
-        if (input.empty())
+string processCommand(const string &raw) {
+    string line = trim(raw);
+    if (line.empty()) return "";
+    istringstream iss(line);
+    string cmd; iss >> cmd;
+    transform(cmd.begin(), cmd.end(), cmd.begin(), ::toupper);
+    if (cmd=="SET") {
+        string key, value; if (!(iss >> key)) return "-ERR wrong number of arguments for 'SET'\r\n";
+        // read value as single token (keeps parity with earlier simple clients)
+        if (!(iss >> value)) return "-ERR wrong number of arguments for 'SET'\r\n";
+        string opt, optVal;
+        if (iss >> opt) {
+            string OPT = opt; transform(OPT.begin(), OPT.end(), OPT.begin(), ::toupper);
+            if (OPT=="EX" || OPT=="PX") { if (!(iss >> optVal)) return "-ERR invalid syntax\r\n"; opt = OPT; }
+            else opt.clear();
+        }
+        return handleSET(key, value, opt, optVal);
+    } else if (cmd=="GET") {
+        string key; iss >> key; return handleGET(key);
+    } else if (cmd=="DEL") {
+        string key; iss >> key; return handleDEL(key);
+    } else if (cmd=="QUIT") {
+        return "+BYE\r\n";
+    } else if (cmd=="INFO") {
+        size_t keys;
+        { lock_guard<mutex> lk(storeMutex); keys = store.size(); }
+        string r = "# miniredis\r\nkeys:" + to_string(keys) + "\nmemory:" + to_string(memUsedBytes.load()) + "\r\n";
+        return r;
+    } else {
+        return "-ERR unknown command\r\n";
+    }
+}
+
+// worker loop
+void workerLoop() {
+    while (!shuttingDown.load()) {
+        ClientRequest req;
+        {
+            unique_lock<mutex> lk(reqMutex);
+            reqCv.wait(lk, []{ return !reqQueue.empty() || shuttingDown.load(); });
+            if (shuttingDown.load() && reqQueue.empty()) return;
+            req = move(reqQueue.front()); reqQueue.pop();
+        }
+        string resp = processCommand(req.raw);
+        if (!resp.empty()) sendStr(req.clientSock, resp);
+    }
+}
+
+// ttl sweeper
+void ttlSweeperLoop() {
+    while (!shuttingDown.load()) {
+        unique_lock<mutex> lk(expiryMutex);
+        if (expiryHeap.empty()) {
+            expiryCv.wait_for(lk, chrono::seconds(1));
             continue;
-
-        istringstream iss(input);
-        string command;
-        iss >> command;
-
-        string key;
-        iss >> key;
-
-        string rest;
-        getline(iss, rest);
-        if (!rest.empty() && rest[0] == ' ')
-            rest.erase(0, 1);
-        string value = trim(rest);
-
-        transform(command.begin(), command.end(), command.begin(), ::toupper);
-
-        string response;
-        bool hasKey = !key.empty();
-        int slot = -1;
-        if (hasKey)
-            slot = keySlot(key);
-
-        if (hasKey && !ownsSlot(slot))
-        {
-            response = "MOVED " + to_string(slot) + " " + NODE_ADDR + ":" + to_string(NODE_PORT) + "\r\n";
-            sendString(clientSock, response);
+        }
+        ExpiryItem top = expiryHeap.top();
+        TimePoint now = SteadyClock::now();
+        if (now < top.expiry) {
+            expiryCv.wait_until(lk, top.expiry);
             continue;
         }
-
-        else if (command == "SET")
-        {
-            if (key.empty() || value.empty())
-            {
-                response = "-ERR wrong number of arguments\r\n";
-            }
-            else
-            {
-                lock_guard<mutex> lock(storeMutex);
-                store[key] = value;
-                response = "+OK\r\n";
-
-
-                string option;
-                iss >> option;
-
-                if (option == "EX")
-                {
-                    int seconds;
-                    iss >> seconds;
-                    if (seconds > 0)
-                    {
-                    
-                        thread([key, seconds]()
-                               {
-                    this_thread::sleep_for(chrono::seconds(seconds));
-                    lock_guard<mutex> lock(storeMutex);
-                    store.erase(key);
-                    cout << "[Node] Expired key: " << key << endl; })
-                            .detach();
-                    }
-                }
-                else if (option == "PX")
-                {
-                    int ms;
-                    iss >> ms;
-                    if (ms > 0)
-                    {
-            
-                        thread([key, ms]()
-                               {
-                    this_thread::sleep_for(chrono::milliseconds(ms));
-                    lock_guard<mutex> lock(storeMutex);
-                    store.erase(key);
-                    cout << "[Node] Expired key: " << key << endl; })
-                            .detach();
-                    }
-                }
+        expiryHeap.pop();
+        lk.unlock();
+        lock_guard<mutex> lk2(storeMutex);
+        auto it = store.find(top.key);
+        if (it != store.end()) {
+            if (it->second.expiry != TimePoint{} && SteadyClock::now() >= it->second.expiry) {
+                memUsedBytes.fetch_sub(it->second.bytes);
+                store.erase(it);
+                cout << "[Node] Expired key: " << top.key << "\n";
             }
         }
     }
 }
 
-string getArg(vector<string> &args, const string &name, const string &def)
-{
-    for (size_t i = 0; i + 1 < args.size(); ++i)
-    {
-        if (args[i] == name)
-            return args[i + 1];
+// accept + per-client reader threads
+void acceptLoop(SOCKET listenSock) {
+    while (!shuttingDown.load()) {
+        sockaddr_in clientAddr{};
+        int clientLen = sizeof(clientAddr);
+        SOCKET clientSock = accept(listenSock, (sockaddr*)&clientAddr, &clientLen);
+        if (clientSock == INVALID_SOCKET) {
+            int err = WSAGetLastError();
+            if (shuttingDown.load()) break;
+            cerr << "[Accept] failed: " << err << "\n";
+            this_thread::sleep_for(chrono::milliseconds(100));
+            continue;
+        }
+        string ip = inet_ntoa(clientAddr.sin_addr);
+        cout << "[Node] Client connected: " << ip << "\n";
+        thread([clientSock, ip]() {
+            char buf[4096];
+            while (true) {
+                int bytes = recv(clientSock, buf, (int)sizeof(buf)-1, 0);
+                if (bytes <= 0) { cout << "[Node] Client disconnected: " << ip << "\n"; closesocket(clientSock); break; }
+                buf[bytes] = '\0';
+                string in(buf);
+                size_t pos = 0;
+                while (pos < in.size()) {
+                    size_t nl = in.find_first_of("\r\n", pos);
+                    string line;
+                    if (nl == string::npos) { line = in.substr(pos); pos = in.size(); }
+                    else { line = in.substr(pos, nl-pos); size_t j = nl; while (j < in.size() && (in[j]=='\r' || in[j]=='\n')) ++j; pos = j; }
+                    line = trim(line);
+                    if (line.empty()) continue;
+                    {
+                        unique_lock<mutex> lk(reqMutex);
+                        if ((int)reqQueue.size() >= REQUEST_QUEUE_CAPACITY) { sendStr(clientSock, "-ERR server busy\r\n"); continue; }
+                        reqQueue.push(ClientRequest{clientSock, line});
+                    }
+                    reqCv.notify_one();
+                }
+            }
+        }).detach();
     }
-    return def;
 }
 
-int main(int argc, char *argv[])
-{
-    vector<string> args(argv, argv + argc);
-
-    NODE_PORT = stoi(getArg(args, "--port", "6379"));
-    SLOT_START = stoi(getArg(args, "--slot-start", "0"));
-    SLOT_END = stoi(getArg(args, "--slot-end", "16383"));
-    NODE_ADDR = getArg(args, "--addr", "127.0.0.1");
-
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
-    {
-        cerr << "WSAStartup failed" << endl;
-        return 1;
+int main(int argc, char *argv[]) {
+    for (int i=1;i<argc;++i) {
+        string a = argv[i];
+        if (a=="--port" && i+1<argc) NODE_PORT = stoi(argv[++i]);
+        else if (a=="--mem" && i+1<argc) MEMORY_LIMIT_BYTES = (size_t)stoll(argv[++i]);
+        else if (a=="--workers" && i+1<argc) WORKER_COUNT = stoi(argv[++i]);
+        else if (a=="--queue" && i+1<argc) REQUEST_QUEUE_CAPACITY = stoi(argv[++i]);
+        else if (a=="--addr" && i+1<argc) NODE_ADDR = argv[++i];
     }
 
+    cout << "MiniRedis Node starting on " << NODE_ADDR << ":" << NODE_PORT << " mem=" << MEMORY_LIMIT_BYTES << " workers=" << WORKER_COUNT << "\n";
+
+    WSADATA wsa; if (WSAStartup(MAKEWORD(2,2), &wsa) != 0) { cerr<<"WSAStartup failed\n"; return 1; }
     SOCKET listenSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (listenSock == INVALID_SOCKET)
-    {
-        cerr << "socket() failed" << endl;
-        WSACleanup();
-        return 1;
-    }
+    if (listenSock == INVALID_SOCKET) { cerr<<"socket failed\n"; WSACleanup(); return 1; }
 
-    sockaddr_in serv{};
-    serv.sin_family = AF_INET;
-    serv.sin_addr.s_addr = htonl(INADDR_ANY);
-    serv.sin_port = htons((unsigned short)NODE_PORT);
+    sockaddr_in serv{}; serv.sin_family = AF_INET; serv.sin_addr.s_addr = htonl(INADDR_ANY); serv.sin_port = htons((unsigned short)NODE_PORT);
+    if (bind(listenSock, (sockaddr*)&serv, sizeof(serv)) == SOCKET_ERROR) { cerr<<"bind failed\n"; closesocket(listenSock); WSACleanup(); return 1; }
+    if (listen(listenSock, SOMAXCONN) == SOCKET_ERROR) { cerr<<"listen failed\n"; closesocket(listenSock); WSACleanup(); return 1; }
 
-    if (bind(listenSock, (sockaddr *)&serv, sizeof(serv)) == SOCKET_ERROR)
-    {
-        cerr << "bind() failed" << endl;
-        closesocket(listenSock);
-        WSACleanup();
-        return 1;
-    }
+    // start workers
+    vector<thread> workers;
+    for (int i=0;i<WORKER_COUNT;++i) workers.emplace_back(workerLoop);
+    // start TTL sweeper
+    thread(ttlSweeperLoop).detach();
+    // accept loop
+    thread(acceptLoop, listenSock).detach();
 
-    if (listen(listenSock, SOMAXCONN) == SOCKET_ERROR)
-    {
-        cerr << "listen() failed" << endl;
-        closesocket(listenSock);
-        WSACleanup();
-        return 1;
-    }
+    cout << "MiniRedis Node running. Ctrl+C to stop.\n";
+    while (true) this_thread::sleep_for(chrono::seconds(60));
 
-    cout << "MiniRedis node running on " << NODE_ADDR << ":" << NODE_PORT
-         << " slots [" << SLOT_START << "-" << SLOT_END << "]\n";
-
-    while (true)
-    {
-        sockaddr_in client{};
-        int clientLen = sizeof(client);
-        SOCKET clientSock = accept(listenSock, (sockaddr *)&client, &clientLen);
-        if (clientSock == INVALID_SOCKET)
-        {
-            cerr << "accept() failed" << endl;
-            continue;
-        }
-        string clientIP = inet_ntoa(client.sin_addr);
-        thread(handleClient, clientSock, clientIP).detach();
-    }
-
+    shuttingDown.store(true);
+    reqCv.notify_all();
+    expiryCv.notify_all();
+    for (auto &t : workers) if (t.joinable()) t.join();
     closesocket(listenSock);
     WSACleanup();
     return 0;
