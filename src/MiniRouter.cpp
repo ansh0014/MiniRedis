@@ -34,7 +34,7 @@ vector<Node> cluster = {
 unordered_map<string,string> apiKeys; 
 mutex apiKeysMutex;
 string APIKEYS_FILE = "apikeys.txt";
-chrono::system_clock::time_point apikeys_mtime = chrono::system_clock::from_time_t(0);
+fs::file_time_type apikeys_mtime = fs::file_time_type::min();
 
 
 void reloadAPIKeysFromFile() {
@@ -68,35 +68,32 @@ void reloadAPIKeysFromFile() {
 void watchAPIKeys() {
     try {
         if (!fs::exists(APIKEYS_FILE)) {
-            // no file yet
-            apikeys_mtime = chrono::system_clock::from_time_t(0);
+            apikeys_mtime = fs::file_time_type::min();
         } else {
             apikeys_mtime = fs::last_write_time(APIKEYS_FILE);
             reloadAPIKeysFromFile();
         }
     } catch (...) {
-        apikeys_mtime = chrono::system_clock::from_time_t(0);
+        apikeys_mtime = fs::file_time_type::min();
     }
 
     while (true) {
         this_thread::sleep_for(chrono::seconds(5));
         try {
             if (!fs::exists(APIKEYS_FILE)) {
-                // file removed
                 bool need = false;
                 {
                     lock_guard<mutex> g(apiKeysMutex);
                     need = !apiKeys.empty();
                 }
                 if (need) {
-                    // clear map
                     {
                         lock_guard<mutex> g(apiKeysMutex);
                         apiKeys.clear();
                     }
                     cout << "[Router] apikeys.txt removed; cleared API keys\n";
                 }
-                apikeys_mtime = chrono::system_clock::from_time_t(0);
+                apikeys_mtime = fs::file_time_type::min();
                 continue;
             }
             auto cur = fs::last_write_time(APIKEYS_FILE);
@@ -163,14 +160,14 @@ condition_variable forwardCv;
 int FORWARD_WORKERS = 8;
 atomic<bool> shuttingDown(false);
 vector<queue<SOCKET>> connPools;
-vector<mutex> poolLocks;
+vector<unique_ptr<mutex>> poolLocks;  // Changed to unique_ptr
 mutex clientWriteMutex;
 
 
 
 SOCKET getConn(int idx) {
     {
-        lock_guard<mutex> lk(poolLocks[idx]);
+        lock_guard<mutex> lk(*poolLocks[idx]);  // Dereference pointer
         if (!connPools[idx].empty()) { SOCKET s = connPools[idx].front(); connPools[idx].pop(); return s; }
     }
     SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -182,7 +179,8 @@ SOCKET getConn(int idx) {
     return s;
 }
 void returnConn(int idx, SOCKET s) {
-    lock_guard<mutex> lk(poolLocks[idx]); connPools[idx].push(s);
+    lock_guard<mutex> lk(*poolLocks[idx]);  // Dereference pointer
+    connPools[idx].push(s);
 }
 string forwardToNode(int idx, const string &cmd) {
     SOCKET s = getConn(idx);
@@ -225,30 +223,65 @@ void clientHandler(SOCKET sock, string ip) {
     cout << "[Router] Client connected: " << ip << "\n";
     bool authenticated = false;
     char buf[4096];
+    string buffer; // accumulate incomplete commands
+    
     while (true) {
         int r = recv(sock, buf, sizeof(buf)-1, 0);
-        if (r <= 0) { cout << "[Router] Client disconnected: " << ip << "\n"; closesocket(sock); break; }
-        buf[r] = '\0'; string input(buf);
-        size_t pos = 0;
-        while (pos < input.size()) {
-            size_t nl = input.find_first_of("\r\n", pos);
-            string cmd = (nl==string::npos) ? input.substr(pos) : input.substr(pos, nl-pos);
-            pos = (nl==string::npos) ? input.size() : nl+1;
-            // trim
-            cmd.erase(0, cmd.find_first_not_of(" \t\r\n")); if (cmd.empty()) continue;
-            cmd.erase(cmd.find_last_not_of(" \t\r\n")+1);
+        if (r <= 0) { 
+            cout << "[Router] Client disconnected: " << ip << "\n"; 
+            closesocket(sock); 
+            break; 
+        }
+        buf[r] = '\0'; 
+        buffer += string(buf);
+        
+        // process complete lines
+        size_t pos;
+        while ((pos = buffer.find('\n')) != string::npos) {
+            string line = buffer.substr(0, pos);
+            buffer.erase(0, pos + 1);
+            
+            // trim whitespace
+            line.erase(0, line.find_first_not_of(" \t\r\n"));
+            line.erase(line.find_last_not_of(" \t\r\n") + 1);
+            
+            if (line.empty()) continue;
+            
             if (!authenticated) {
-                string c1, c2; istringstream iss(cmd); iss >> c1 >> c2; transform(c1.begin(), c1.end(), c1.begin(), ::toupper);
-                if (c1 != "AUTH") { string err = "-ERR must AUTH first\r\n"; send(sock, err.c_str(), (int)err.size(), 0); continue; }
+                string c1, c2; 
+                istringstream iss(line); 
+                iss >> c1 >> c2; 
+                transform(c1.begin(), c1.end(), c1.begin(), ::toupper);
+                
+                if (c1 != "AUTH") { 
+                    string err = "-ERR must AUTH first\r\n"; 
+                    send(sock, err.c_str(), (int)err.size(), 0); 
+                    continue; 
+                }
+                
                 // validate key
                 bool ok = false;
-                { lock_guard<mutex> g(apiKeysMutex); if (apiKeys.count(c2)) ok = true; }
-                if (ok) { authenticated = true; string okmsg = "+OK authenticated\r\n"; send(sock, okmsg.c_str(), (int)okmsg.size(), 0); }
-                else { string err = "-ERR invalid API key\r\n"; send(sock, err.c_str(), (int)err.size(), 0); }
+                { 
+                    lock_guard<mutex> g(apiKeysMutex); 
+                    if (apiKeys.count(c2)) ok = true; 
+                }
+                
+                if (ok) { 
+                    authenticated = true; 
+                    string okmsg = "+OK authenticated\r\n"; 
+                    send(sock, okmsg.c_str(), (int)okmsg.size(), 0); 
+                } else { 
+                    string err = "-ERR invalid API key\r\n"; 
+                    send(sock, err.c_str(), (int)err.size(), 0); 
+                }
                 continue;
             }
+            
             // enqueue forward task
-            { lock_guard<mutex> lg(forwardMutex); forwardQ.push({sock, cmd}); }
+            { 
+                lock_guard<mutex> lg(forwardMutex); 
+                forwardQ.push({sock, line}); 
+            }
             forwardCv.notify_one();
         }
     }
@@ -258,29 +291,46 @@ int main(int argc, char *argv[]) {
     int PORT = 7000; if (argc>=2) PORT = stoi(argv[1]);
     cout << "[Router] starting on port " << PORT << "\n";
     // initialize connPools and locks
-    connPools.resize(cluster.size()); poolLocks.resize(cluster.size());
+    connPools.resize(cluster.size());
+    poolLocks.reserve(cluster.size());
+    for (size_t i = 0; i < cluster.size(); ++i) {
+        poolLocks.push_back(make_unique<mutex>());
+    }
     // start file watcher
     thread(watchAPIKeys).detach();
-    // winsock startup
-    WSADATA wsa; if (WSAStartup(MAKEWORD(2,2), &wsa) != 0) { cerr<<"WSAStartup failed\n"; return 1; }
+    // winsock
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2,2), &wsa) != 0) { cerr << "WSAStartup failed\n"; return 1; }
+    
     SOCKET listenSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (listenSock == INVALID_SOCKET) { cerr<<"socket failed\n"; WSACleanup(); return 1; }
-    sockaddr_in serv{}; serv.sin_family = AF_INET; serv.sin_addr.s_addr = htonl(INADDR_ANY); serv.sin_port = htons((unsigned short)PORT);
-    if (bind(listenSock, (sockaddr*)&serv, sizeof(serv)) == SOCKET_ERROR) { cerr<<"bind failed\n"; closesocket(listenSock); WSACleanup(); return 1; }
-    if (listen(listenSock, SOMAXCONN) == SOCKET_ERROR) { cerr<<"listen failed\n"; closesocket(listenSock); WSACleanup(); return 1; }
-    // start forward workers
-    vector<thread> workers; for (int i=0;i<FORWARD_WORKERS;++i) workers.emplace_back(forwardWorker);
-    cout << "[Router] ready. waiting for clients...\n";
-    while (true) {
-        sockaddr_in caddr{}; int clen = sizeof(caddr);
-        SOCKET s = accept(listenSock, (sockaddr*)&caddr, &clen);
-        if (s == INVALID_SOCKET) { this_thread::sleep_for(chrono::milliseconds(100)); continue; }
-        string ip = inet_ntoa(caddr.sin_addr);
-        thread(clientHandler, s, ip).detach();
+    if (listenSock == INVALID_SOCKET) { cerr << "socket() failed\n"; WSACleanup(); return 1; }
+    
+    sockaddr_in serv{}; serv.sin_family = AF_INET;
+    serv.sin_addr.s_addr = htonl(INADDR_ANY);
+    serv.sin_port = htons(PORT);
+    
+    if (bind(listenSock, (sockaddr*)&serv, sizeof(serv)) == SOCKET_ERROR) {
+        cerr << "bind() failed\n"; closesocket(listenSock); WSACleanup(); return 1;
     }
-    // cleanup (not reached)
-    shuttingDown.store(true); forwardCv.notify_all();
-    for (auto &t : workers) if (t.joinable()) t.join();
-    closesocket(listenSock); WSACleanup();
+    if (listen(listenSock, SOMAXCONN) == SOCKET_ERROR) {
+        cerr << "listen() failed\n"; closesocket(listenSock); WSACleanup(); return 1;
+    }
+    
+    cout << "[Router] Listening on port " << PORT << "\n";
+    
+    // start forward workers
+    vector<thread> workers;
+    for (int i=0; i<FORWARD_WORKERS; ++i) workers.emplace_back(forwardWorker);
+    
+    while (true) {
+        sockaddr_in client{}; int clientLen = sizeof(client);
+        SOCKET clientSock = accept(listenSock, (sockaddr*)&client, &clientLen);
+        if (clientSock == INVALID_SOCKET) { cerr << "accept() failed\n"; continue; }
+        string clientIP = inet_ntoa(client.sin_addr);
+        thread(clientHandler, clientSock, clientIP).detach();
+    }
+    
+    closesocket(listenSock);
+    WSACleanup();
     return 0;
 }
