@@ -40,11 +40,17 @@
 # debug information files
 *.dwo
 
-# API keys and auth files
-authkey.txt
+# API keys and auth files (sensitive data)
+config/apikeys.txt
+
 apikeys.txt
 **/authkey.txt
 **/apikeys.txt
+config/config.json
+config/tenants.json
+/.env
+.env
+
 
 # Visual Studio / VS Code
 .vs/
@@ -59,3 +65,13 @@ bin/
 # OS files
 Thumbs.db
 .DS_Store
+
+# Runtime logs and data
+*.log
+dump.rdb
+appendonly.aof
+
+# Temporary files
+*.tmp
+*.temp
+*~
