@@ -1,4 +1,4 @@
-version: '3.8'
+
 
 services:
   postgres:
@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: ${DB_NAME:-miniredis}
       POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}  # ← Read from .env file
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "5002:5432"
@@ -33,12 +33,12 @@ services:
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-miniredis}
       DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD}  
+      DB_PASSWORD: ${DB_PASSWORD}
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: ${BACKEND_PORT:-5500}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
-      - "${BACKEND_PORT:-5500}:5500"  
+      - "${BACKEND_PORT:-5500}:5500"
     depends_on:
       postgres:
         condition: service_healthy

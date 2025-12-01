@@ -1,5 +1,26 @@
-#include <winsock2.h>
-#include <ws2tcpip.h>
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+
+// Platform-specific headers
+#ifdef _WIN32
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+    #pragma comment(lib, "Ws2_32.lib")
+    typedef int socklen_t;
+#else
+    #include <sys/types.h>
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <unistd.h>
+    #include <netdb.h>
+    #include <errno.h>
+    #include <cstring>
+    #define SOCKET int
+    #define INVALID_SOCKET -1
+    #define SOCKET_ERROR -1
+    #define closesocket close
+    #define WSAGetLastError() errno
+#endif
 
 #include <iostream>
 #include <string>
@@ -16,7 +37,6 @@
 
 #include "TenantManager.h"
 
-#pragma comment(lib, "Ws2_32.lib")
 using namespace std;
 using SteadyClock = chrono::steady_clock;
 using TimePoint = chrono::time_point<SteadyClock>;
@@ -416,7 +436,7 @@ void acceptLoop(SOCKET listenSock)
     while (!shuttingDown.load())
     {
         sockaddr_in clientAddr{};
-        int clientLen = sizeof(clientAddr);
+        socklen_t clientLen = sizeof(clientAddr);
         SOCKET clientSock = accept(listenSock, (sockaddr *)&clientAddr, &clientLen);
 
         if (clientSock == INVALID_SOCKET)
@@ -429,7 +449,8 @@ void acceptLoop(SOCKET listenSock)
             continue;
         }
 
-        string ip = inet_ntoa(clientAddr.sin_addr);
+        char ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &clientAddr.sin_addr, ip, INET_ADDRSTRLEN);
         cout << "[Node] Client connected: " << ip << "\n";
 
         thread([clientSock, ip]()
@@ -493,7 +514,6 @@ void acceptLoop(SOCKET listenSock)
 
 int main(int argc, char *argv[])
 {
-
     for (int i = 1; i < argc; ++i)
     {
         string a = argv[i];
@@ -518,33 +538,42 @@ int main(int argc, char *argv[])
 
     tenantMgr.addTenant(TENANT_ID, "Node Tenant", NODE_PORT);
 
+#ifdef _WIN32
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
     {
         cerr << "WSAStartup failed\n";
         return 1;
     }
+#endif
 
     SOCKET listenSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (listenSock == INVALID_SOCKET)
     {
         cerr << "socket failed\n";
+#ifdef _WIN32
         WSACleanup();
+#endif
         return 1;
     }
 
+    // Allow socket reuse
+    int opt = 1;
+    setsockopt(listenSock, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+
     sockaddr_in serv{};
     serv.sin_family = AF_INET;
-    serv.sin_addr.s_addr = htonl(INADDR_ANY);
+    serv.sin_addr.s_addr = INADDR_ANY;
     serv.sin_port = htons((unsigned short)NODE_PORT);
-    
 
-        if (::bind(listenSock, (sockaddr *)&serv, sizeof(serv)) == SOCKET_ERROR)
+    if (::bind(listenSock, (sockaddr *)&serv, sizeof(serv)) == SOCKET_ERROR)
     {
         int err = WSAGetLastError();
         cerr << "[Node] bind failed: " << err << "\n";
         closesocket(listenSock);
+#ifdef _WIN32
         WSACleanup();
+#endif
         return 1;
     }
 
@@ -552,7 +581,9 @@ int main(int argc, char *argv[])
     {
         cerr << "listen failed\n";
         closesocket(listenSock);
+#ifdef _WIN32
         WSACleanup();
+#endif
         return 1;
     }
 
@@ -561,7 +592,6 @@ int main(int argc, char *argv[])
         workers.emplace_back(workerLoop);
 
     thread(ttlSweeperLoop).detach();
-
     thread(acceptLoop, listenSock).detach();
 
     cout << "[Node] Running. Press Ctrl+C to stop.\n";
@@ -575,6 +605,8 @@ int main(int argc, char *argv[])
         if (t.joinable())
             t.join();
     closesocket(listenSock);
+#ifdef _WIN32
     WSACleanup();
+#endif
     return 0;
 }
