@@ -1,15 +1,13 @@
-
 version: '3.8'
 
 services:
-
   postgres:
     image: postgres:15-alpine
     container_name: miniredis-postgres
     environment:
       POSTGRES_DB: ${DB_NAME:-miniredis}
       POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-chemistry@14}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}  # ← Read from .env file
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "5002:5432"
@@ -35,12 +33,12 @@ services:
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-miniredis}
       DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-chemistry@14}
+      DB_PASSWORD: ${DB_PASSWORD}  
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: ${BACKEND_PORT:-5500}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
-      - "${BACKEND_PORT:-5500}:5500"
+      - "${BACKEND_PORT:-5500}:5500"  
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,7 +57,6 @@ services:
     networks:
       - miniredis-network
     restart: unless-stopped
-
 
   redis-node2:
     build:
@@ -84,7 +81,6 @@ services:
     networks:
       - miniredis-network
     restart: unless-stopped
-
 
   router:
     build:
