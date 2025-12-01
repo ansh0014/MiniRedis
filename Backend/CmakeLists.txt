@@ -4,20 +4,17 @@ project(miniredis_backend CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Set vcpkg toolchain
-set(CMAKE_TOOLCHAIN_FILE "D:/cpp-tools/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "Vcpkg toolchain file")
-
 # Find required packages
 find_package(Drogon CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS uuid)
 
-# Find redis++ (optional, but recommended)
+# Find redis++ (optional)
 find_package(redis++ CONFIG)
 if(redis++_FOUND)
     message(STATUS "Found redis++")
     set(REDIS_LIBS redis++::redis++)
 else()
-    message(WARNING "redis++ not found, some features disabled")
+    message(WARNING "redis++ not found - Redis caching disabled")
     set(REDIS_LIBS "")
 endif()
 
@@ -34,6 +31,7 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 target_include_directories(${PROJECT_NAME} PRIVATE 
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/controller
+    ${CMAKE_CURRENT_SOURCE_DIR}/utils
     ${Boost_INCLUDE_DIRS}
 )
 
@@ -44,7 +42,9 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ${REDIS_LIBS}
 )
 
-# Windows-specific libraries
+# Platform-specific libraries
 if(WIN32)
-    target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32)
+    target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32 wsock32)
+else()
+    target_link_libraries(${PROJECT_NAME} PRIVATE pthread)
 endif()

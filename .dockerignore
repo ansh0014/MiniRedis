@@ -1,0 +1,40 @@
+# Build artifacts
+**/build/
+**/bin/
+**/obj/
+**/.vs/
+**/.vscode/
+**/cmake-build-*/
+
+# Executables
+**/*.exe
+**/*.dll
+**/*.so
+**/*.dylib
+**/*.obj
+**/*.o
+
+# Environment files
+.env.local
+*.env.backup
+
+# Git
+.git/
+.gitignore
+
+# Logs
+logs/
+*.log
+
+# Documentation
+docs/
+examples/
+*.md
+!README.md
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store

@@ -80,6 +80,35 @@ void ApiController::createTenant(const HttpRequestPtr &req, std::function<void(c
         uuid, name, port, mem);
 }
 
+void ApiController::getTenant(const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &tenantId)
+{
+    auto sql = "SELECT id, name, node_port, memory_limit_mb FROM tenants WHERE id = $1";
+    db_->execSqlAsync(sql,
+        [callback](const drogon::orm::Result &r) {
+            if (r.size() == 0) {
+                auto resp = HttpResponse::newHttpResponse();
+                resp->setStatusCode(k404NotFound);
+                resp->setBody("{\"error\":\"tenant not found\"}");
+                callback(resp);
+                return;
+            }
+
+            Json::Value out;
+            out["tenant_id"] = r[0]["id"].as<string>();
+            out["name"] = r[0]["name"].as<string>();
+            out["node_port"] = r[0]["node_port"].as<int>();
+            out["memory_limit_mb"] = r[0]["memory_limit_mb"].as<int>();
+            callback(HttpResponse::newHttpJsonResponse(out));
+        },
+        [callback](const drogon::orm::DrogonDbException &err) {
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k500InternalServerError);
+            resp->setBody("{\"error\":\"db error\"}");
+            callback(resp);
+        },
+        tenantId);
+}
+
 void ApiController::createApiKey(const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback)
 {
     auto json = req->getJsonObject();
@@ -182,9 +211,10 @@ void ApiController::verifyApiKey(const HttpRequestPtr &req, std::function<void(c
         key);
 }
 
-void ApiController::revokeApiKey(const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback)
+
+
+void ApiController::revokeApiKey(const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &key)
 {
-    string key = req->getParameter("key");
     if (key.empty()) {
         auto r = HttpResponse::newHttpResponse();
         r->setStatusCode(k400BadRequest);
@@ -196,7 +226,10 @@ void ApiController::revokeApiKey(const HttpRequestPtr &req, std::function<void(c
     auto sql = "DELETE FROM api_keys WHERE key = $1";
     db_->execSqlAsync(sql,
         [this, key, callback](const drogon::orm::Result &r) {
-            try { if (redis_) redis_->del("apikey:" + key); } catch(...) {}
+            try { 
+                if (redis_) redis_->del("apikey:" + key); 
+            } catch(...) {}
+            
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k200OK);
             resp->setBody("{\"status\":\"revoked\"}");

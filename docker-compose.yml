@@ -1,0 +1,115 @@
+
+version: '3.8'
+
+services:
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: miniredis-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-miniredis}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-chemistry@14}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5002:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./Backend/db/db.sql:/docker-entrypoint-initdb.d/01-init.sql
+    networks:
+      - miniredis-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d miniredis"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: miniredis-backend
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-miniredis}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-chemistry@14}
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: ${BACKEND_PORT:-5500}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${BACKEND_PORT:-5500}:5500"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - miniredis-network
+    restart: unless-stopped
+
+  redis-node1:
+    build:
+      context: .
+      dockerfile: node/Dockerfile
+    container_name: miniredis-node1
+    command: ["--port", "6379", "--tenant", "tenant1"]
+    ports:
+      - "${NODE1_PORT:-6379}:6379"
+    networks:
+      - miniredis-network
+    restart: unless-stopped
+
+
+  redis-node2:
+    build:
+      context: .
+      dockerfile: node/Dockerfile
+    container_name: miniredis-node2
+    command: ["--port", "6380", "--tenant", "tenant2"]
+    ports:
+      - "${NODE2_PORT:-6380}:6380"
+    networks:
+      - miniredis-network
+    restart: unless-stopped
+
+  redis-node3:
+    build:
+      context: .
+      dockerfile: node/Dockerfile
+    container_name: miniredis-node3
+    command: ["--port", "6381", "--tenant", "tenant3"]
+    ports:
+      - "${NODE3_PORT:-6381}:6381"
+    networks:
+      - miniredis-network
+    restart: unless-stopped
+
+
+  router:
+    build:
+      context: .
+      dockerfile: router/Dockerfile
+    container_name: miniredis-router
+    environment:
+      ROUTER_PORT: ${ROUTER_PORT:-6300}
+      BACKEND_HOST: backend
+      BACKEND_PORT: 5500
+    ports:
+      - "${ROUTER_PORT:-6300}:6300"
+    depends_on:
+      - backend
+      - redis-node1
+      - redis-node2
+      - redis-node3
+    networks:
+      - miniredis-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  miniredis-network:
+    driver: bridge
