@@ -1,11 +1,11 @@
 #pragma once
 #include <drogon/HttpController.h>
 #include <drogon/orm/DbClient.h>
+#include <sw/redis++/redis++.h>  
 #include <memory>
 #include <string>
 
-// Forward declarations
-namespace sw { namespace redis { class Redis; } }
+using namespace drogon;
 
 class ApiController : public drogon::HttpController<ApiController>
 {
@@ -35,5 +35,5 @@ public:
 
 private:
     drogon::orm::DbClientPtr db_;
-    std::unique_ptr<sw::redis::Redis> redis_;
+    std::unique_ptr<sw::redis::Redis> redis_;  // Now this will compile
 };

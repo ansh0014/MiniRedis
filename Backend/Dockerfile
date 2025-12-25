@@ -28,17 +28,32 @@ RUN git clone https://github.com/drogonframework/drogon.git && \
     make install && \
     ldconfig
 
-# Install redis-plus-plus (optional)
-RUN git clone https://github.com/sewenew/redis-plus-plus.git /tmp/redis-plus-plus && \
-    cd /tmp/redis-plus-plus && \
+# Install hiredis WITH CMAKE (FIXED: was using make before)
+RUN git clone https://github.com/redis/hiredis.git /tmp/hiredis && \
+    cd /tmp/hiredis && \
     mkdir build && cd build && \
-    cmake -DCMAKE_BUILD_TYPE=Release .. && \
+    cmake -DCMAKE_BUILD_TYPE=Release \
+          -DENABLE_SSL=ON \
+          -DCMAKE_INSTALL_PREFIX=/usr/local \
+          .. && \
     make -j$(nproc) && \
     make install && \
     ldconfig
 
-# Clean up
-RUN rm -rf /tmp/drogon /tmp/redis-plus-plus
+# Install redis-plus-plus
+RUN git clone https://github.com/sewenew/redis-plus-plus.git /tmp/redis-plus-plus && \
+    cd /tmp/redis-plus-plus && \
+    mkdir build && cd build && \
+    cmake -DCMAKE_BUILD_TYPE=Release \
+          -DREDIS_PLUS_PLUS_CXX_STANDARD=17 \
+          -DCMAKE_PREFIX_PATH=/usr/local \
+          .. && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig
+
+# Clean up build artifacts
+RUN rm -rf /tmp/drogon /tmp/hiredis /tmp/redis-plus-plus
 
 # Copy source code
 WORKDIR /app
@@ -46,7 +61,9 @@ COPY . .
 
 # Build the backend
 RUN mkdir -p build && cd build && \
-    cmake -DCMAKE_BUILD_TYPE=Release .. && \
+    cmake -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_PREFIX_PATH="/usr/local/lib/cmake;/usr/local" \
+          .. && \
     make -j$(nproc)
 
 # ========================================
@@ -67,7 +84,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy libraries and binary
+# Copy libraries and binary from builder
 COPY --from=builder /usr/local/lib /usr/local/lib
 COPY --from=builder /app/build/miniredis_backend /app/miniredis_backend
 

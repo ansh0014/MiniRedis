@@ -1,28 +1,47 @@
 #include "ApiController.h"
+#include "../config/config.h"
 #include <drogon/drogon.h>
 #include <drogon/orm/Exception.h>
-#include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_generators.hpp>
-#include <boost/uuid/uuid_io.hpp>
+#include <sw/redis++/redis++.h>
 #include <random>
 #include <iomanip>
 #include <sstream>
-#include <exception>
-
-// redis++
-#include <sw/redis++/redis++.h>
 
 using namespace drogon;
 using namespace std;
 using namespace sw::redis;
 
+// Generate UUID v4 using standard C++
+static string generateUuid()
+{
+    static random_device rd;
+    static mt19937_64 gen(rd());
+    static uniform_int_distribution<uint64_t> dis;
+    
+    ostringstream oss;
+    oss << hex << setfill('0');
+    
+    uint64_t part1 = dis(gen);
+    uint64_t part2 = dis(gen);
+    
+    // UUID format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+    oss << setw(8) << (part1 & 0xFFFFFFFF) << "-";
+    oss << setw(4) << ((part1 >> 32) & 0xFFFF) << "-";
+    oss << setw(4) << ((part2 & 0x0FFF) | 0x4000) << "-";  // Version 4
+    oss << setw(4) << ((part2 >> 16) & 0x3FFF | 0x8000) << "-";  // Variant
+    oss << setw(12) << ((part2 >> 32) & 0xFFFFFFFF);
+    oss << setw(4) << (dis(gen) & 0xFFFF);
+    
+    return oss.str();
+}
+
+// Generate 256-bit API key
 static string generateApiKeyHex()
 {
-    // 256-bit (32 bytes) hex token using CSPRNG
-    std::random_device rd;
-    std::mt19937_64 gen(rd());
-    std::uniform_int_distribution<uint64_t> dis;
-    std::ostringstream oss;
+    random_device rd;
+    mt19937_64 gen(rd());
+    uniform_int_distribution<uint64_t> dis;
+    ostringstream oss;
     oss << hex << setfill('0');
     for (int i = 0; i < 4; ++i) {
         uint64_t v = dis(gen);
@@ -33,19 +52,26 @@ static string generateApiKeyHex()
 
 ApiController::ApiController()
 {
-    // Get drogon DB client named "postgres" configured in config.json
-    db_ = drogon::app().getDbClient("postgres");
-
-    // Create redis client (adjust URI if needed)
+    db_ = drogon::app().getDbClient("default");
+    
+    // Load Redis config from EnvLoader
+    string redisHost = EnvLoader::get("REDIS_HOST", "localhost");
+    int redisPort = EnvLoader::getInt("REDIS_PORT", 6379);
+    
     try {
-        redis_ = make_unique<Redis>("tcp://127.0.0.1:6379");
-    } catch (const std::exception &ex) {
+        ConnectionOptions opts;
+        opts.host = redisHost;
+        opts.port = redisPort;
+        opts.socket_timeout = chrono::milliseconds(100);
+        redis_ = make_unique<Redis>(opts);
+        LOG_INFO << "Redis connected: " << redisHost << ":" << redisPort;
+    } catch (const exception &ex) {
         LOG_ERROR << "Redis init failed: " << ex.what();
         redis_.reset();
     }
 }
 
-void ApiController::createTenant(const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback)
+void ApiController::createTenant(const HttpRequestPtr &req, function<void(const HttpResponsePtr &)> &&callback)
 {
     auto json = req->getJsonObject();
     if (!json || !(*json).isMember("name") || !(*json).isMember("node_port")) {
@@ -60,18 +86,17 @@ void ApiController::createTenant(const HttpRequestPtr &req, std::function<void(c
     int port = (*json)["node_port"].asInt();
     int mem = (*json).isMember("memory_limit_mb") ? (*json)["memory_limit_mb"].asInt() : 40;
 
-    boost::uuids::uuid u = boost::uuids::random_generator()();
-    string uuid = boost::uuids::to_string(u);
+    string uuid = generateUuid();
 
     auto sql = "INSERT INTO tenants (id, name, node_port, memory_limit_mb) VALUES ($1, $2, $3, $4)";
     db_->execSqlAsync(sql,
-        [uuid, callback](const drogon::orm::Result &r) {
+        [uuid, callback](const drogon::orm::Result &) {
             Json::Value out;
             out["tenant_id"] = uuid;
             auto resp = HttpResponse::newHttpJsonResponse(out);
             callback(resp);
         },
-        [callback](const drogon::orm::DrogonDbException &err) {
+        [callback](const drogon::orm::DrogonDbException &) {
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k500InternalServerError);
             resp->setBody("{\"error\":\"db error\"}");
@@ -80,7 +105,7 @@ void ApiController::createTenant(const HttpRequestPtr &req, std::function<void(c
         uuid, name, port, mem);
 }
 
-void ApiController::getTenant(const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &tenantId)
+void ApiController::getTenant(const HttpRequestPtr &, function<void(const HttpResponsePtr &)> &&callback, const string &tenantId)
 {
     auto sql = "SELECT id, name, node_port, memory_limit_mb FROM tenants WHERE id = $1";
     db_->execSqlAsync(sql,
@@ -100,7 +125,7 @@ void ApiController::getTenant(const HttpRequestPtr &req, std::function<void(cons
             out["memory_limit_mb"] = r[0]["memory_limit_mb"].as<int>();
             callback(HttpResponse::newHttpJsonResponse(out));
         },
-        [callback](const drogon::orm::DrogonDbException &err) {
+        [callback](const drogon::orm::DrogonDbException &) {
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k500InternalServerError);
             resp->setBody("{\"error\":\"db error\"}");
@@ -109,7 +134,7 @@ void ApiController::getTenant(const HttpRequestPtr &req, std::function<void(cons
         tenantId);
 }
 
-void ApiController::createApiKey(const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback)
+void ApiController::createApiKey(const HttpRequestPtr &req, function<void(const HttpResponsePtr &)> &&callback)
 {
     auto json = req->getJsonObject();
     if (!json || !(*json).isMember("tenant_id")) {
@@ -126,23 +151,22 @@ void ApiController::createApiKey(const HttpRequestPtr &req, std::function<void(c
 
     auto sql = "INSERT INTO api_keys (key, tenant_id, description) VALUES ($1, $2, $3)";
     db_->execSqlAsync(sql,
-        [this, apiKey, tenantId, callback](const drogon::orm::Result &r) {
-            // write to redis for fast lookup
-            try {
-                if (redis_) {
-                    redis_->set("apikey:" + apiKey, tenantId);
-                }
-            } catch (const std::exception &ex) {
-                LOG_WARN << "Redis SET failed: " << ex.what();
-            }
-
+        [apiKey, tenantId, callback, this](const drogon::orm::Result &) {
             Json::Value out;
             out["api_key"] = apiKey;
             out["tenant_id"] = tenantId;
             auto resp = HttpResponse::newHttpJsonResponse(out);
             callback(resp);
+            
+            if (redis_) {
+                try {
+                    redis_->set("apikey:" + apiKey, tenantId);
+                } catch (const exception &ex) {
+                    LOG_WARN << "Redis cache set failed: " << ex.what();
+                }
+            }
         },
-        [callback](const drogon::orm::DrogonDbException &err) {
+        [callback](const drogon::orm::DrogonDbException &) {
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k500InternalServerError);
             resp->setBody("{\"error\":\"db error\"}");
@@ -151,7 +175,7 @@ void ApiController::createApiKey(const HttpRequestPtr &req, std::function<void(c
         apiKey, tenantId, desc);
 }
 
-void ApiController::verifyApiKey(const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback)
+void ApiController::verifyApiKey(const HttpRequestPtr &req, function<void(const HttpResponsePtr &)> &&callback)
 {
     string key = req->getParameter("key");
     if (key.empty()) {
@@ -166,9 +190,8 @@ void ApiController::verifyApiKey(const HttpRequestPtr &req, std::function<void(c
         return;
     }
 
-    // Check Redis first
-    try {
-        if (redis_) {
+    if (redis_) {
+        try {
             auto val = redis_->get("apikey:" + key);
             if (val) {
                 Json::Value out;
@@ -176,15 +199,14 @@ void ApiController::verifyApiKey(const HttpRequestPtr &req, std::function<void(c
                 callback(HttpResponse::newHttpJsonResponse(out));
                 return;
             }
+        } catch (const exception &ex) {
+            LOG_WARN << "Redis cache get failed: " << ex.what();
         }
-    } catch (const std::exception &ex) {
-        LOG_WARN << "Redis GET failed: " << ex.what();
     }
 
-    // Fallback to Postgres
     auto sql = "SELECT tenant_id FROM api_keys WHERE key = $1";
     db_->execSqlAsync(sql,
-        [this, key, callback](const drogon::orm::Result &r) {
+        [callback, key, this](const drogon::orm::Result &r) {
             if (r.size() == 0) {
                 auto resp = HttpResponse::newHttpResponse();
                 resp->setStatusCode(k401Unauthorized);
@@ -194,15 +216,19 @@ void ApiController::verifyApiKey(const HttpRequestPtr &req, std::function<void(c
             }
             string tenantId = r[0]["tenant_id"].as<string>();
 
-            try {
-                if (redis_) redis_->set("apikey:" + key, tenantId);
-            } catch (...) {}
-
             Json::Value out;
             out["tenant_id"] = tenantId;
             callback(HttpResponse::newHttpJsonResponse(out));
+            
+            if (redis_) {
+                try {
+                    redis_->set("apikey:" + key, tenantId);
+                } catch (const exception &ex) {
+                    LOG_WARN << "Redis cache update failed: " << ex.what();
+                }
+            }
         },
-        [callback](const drogon::orm::DrogonDbException &err) {
+        [callback](const drogon::orm::DrogonDbException &) {
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k500InternalServerError);
             resp->setBody("{\"error\":\"db error\"}");
@@ -211,9 +237,7 @@ void ApiController::verifyApiKey(const HttpRequestPtr &req, std::function<void(c
         key);
 }
 
-
-
-void ApiController::revokeApiKey(const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &key)
+void ApiController::revokeApiKey(const HttpRequestPtr &, function<void(const HttpResponsePtr &)> &&callback, const string &key)
 {
     if (key.empty()) {
         auto r = HttpResponse::newHttpResponse();
@@ -225,17 +249,21 @@ void ApiController::revokeApiKey(const HttpRequestPtr &req, std::function<void(c
 
     auto sql = "DELETE FROM api_keys WHERE key = $1";
     db_->execSqlAsync(sql,
-        [this, key, callback](const drogon::orm::Result &r) {
-            try { 
-                if (redis_) redis_->del("apikey:" + key); 
-            } catch(...) {}
-            
+        [callback, key, this](const drogon::orm::Result &) {
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k200OK);
             resp->setBody("{\"status\":\"revoked\"}");
             callback(resp);
+            
+            if (redis_) {
+                try {
+                    redis_->del("apikey:" + key);
+                } catch (const exception &ex) {
+                    LOG_WARN << "Redis cache delete failed: " << ex.what();
+                }
+            }
         },
-        [callback](const drogon::orm::DrogonDbException &err) {
+        [callback](const drogon::orm::DrogonDbException &) {
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k500InternalServerError);
             resp->setBody("{\"error\":\"db error\"}");

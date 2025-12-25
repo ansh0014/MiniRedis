@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(miniredis_backend CXX)
+project(miniredis_router CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,15 +9,16 @@ if(POLICY CMP0167)
     cmake_policy(SET CMP0167 NEW)
 endif()
 
-# Find required packages
+# Find packages
 find_package(Drogon CONFIG REQUIRED)
 find_package(hiredis CONFIG REQUIRED)
 find_package(redis++ CONFIG REQUIRED)
+find_package(CURL REQUIRED)
 
 # Source files
 set(SOURCES
-    main.cc
-    controller/ApiController.cc
+    main.cpp
+    Router.cpp
     ../config/config.cpp
 )
 
@@ -27,8 +28,8 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 # Include directories
 target_include_directories(${PROJECT_NAME} PRIVATE 
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/controller
     ${CMAKE_CURRENT_SOURCE_DIR}/../config
+    ${CURL_INCLUDE_DIRS}
 )
 
 # Compiler-specific flags
@@ -45,7 +46,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Drogon::Drogon
     redis++::redis++
     hiredis::hiredis
-    PostgreSQL::PostgreSQL
+    CURL::libcurl
 )
 
 # Platform-specific libraries
@@ -54,11 +55,3 @@ if(WIN32)
 else()
     target_link_libraries(${PROJECT_NAME} PRIVATE pthread)
 endif()
-
-# Check if PostgreSQL libraries are available
-file(GLOB_RECURSE POSTGRESQL_LIBS "D:/vcpkg/installed/x64-windows/lib/*.lib")
-foreach(LIB ${POSTGRESQL_LIBS})
-    if("${LIB}" MATCHES "libpq.lib" OR "${LIB}" MATCHES "libpq.dll.lib")
-        message(STATUS "Found PostgreSQL library: ${LIB}")
-    endif()
-endforeach()

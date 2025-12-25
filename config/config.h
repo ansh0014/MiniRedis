@@ -7,10 +7,10 @@
 
 class EnvLoader {
 public:
-    static bool load(const std::string& filename = ".env") {
-        std::ifstream file(filename);
+    static bool load(const std::string& filepath) {
+        std::ifstream file(filepath);
         if (!file.is_open()) {
-            std::cerr << "[ENV] Warning: " << filename << " not found\n";
+            std::cerr << "[WARN] .env file not found: " << filepath << std::endl;
             return false;
         }
 
@@ -18,46 +18,51 @@ public:
         while (std::getline(file, line)) {
             // Skip empty lines and comments
             if (line.empty() || line[0] == '#') continue;
-
-            // Find = separator
+            
             size_t pos = line.find('=');
-            if (pos == std::string::npos) continue;
-
-            std::string key = trim(line.substr(0, pos));
-            std::string value = trim(line.substr(pos + 1));
-
-            // Remove quotes if present
-            if (!value.empty() && value.front() == '"' && value.back() == '"') {
-                value = value.substr(1, value.length() - 2);
+            if (pos != std::string::npos) {
+                std::string key = line.substr(0, pos);
+                std::string value = line.substr(pos + 1);
+                
+                // Trim whitespace
+                key.erase(0, key.find_first_not_of(" \t\r\n"));
+                key.erase(key.find_last_not_of(" \t\r\n") + 1);
+                value.erase(0, value.find_first_not_of(" \t\r\n"));
+                value.erase(value.find_last_not_of(" \t\r\n") + 1);
+                
+                env_vars[key] = value;
             }
-
-            env_vars[key] = value;
         }
-
-        std::cout << "[ENV] Loaded " << env_vars.size() << " environment variables\n";
+        file.close();
         return true;
     }
 
     static std::string get(const std::string& key, const std::string& defaultValue = "") {
         auto it = env_vars.find(key);
-        return (it != env_vars.end()) ? it->second : defaultValue;
+        if (it != env_vars.end()) {
+            return it->second;
+        }
+        // Fallback to system environment
+        const char* val = std::getenv(key.c_str());
+        return val ? std::string(val) : defaultValue;
     }
 
     static int getInt(const std::string& key, int defaultValue = 0) {
-        auto value = get(key);
-        return value.empty() ? defaultValue : std::stoi(value);
+        std::string val = get(key);
+        if (val.empty()) return defaultValue;
+        try {
+            return std::stoi(val);
+        } catch (...) {
+            return defaultValue;
+        }
+    }
+
+    static bool getBool(const std::string& key, bool defaultValue = false) {
+        std::string val = get(key);
+        if (val.empty()) return defaultValue;
+        return (val == "true" || val == "1" || val == "yes");
     }
 
 private:
     static std::unordered_map<std::string, std::string> env_vars;
-
-    static std::string trim(const std::string& str) {
-        size_t first = str.find_first_not_of(" \t\r\n");
-        if (first == std::string::npos) return "";
-        size_t last = str.find_last_not_of(" \t\r\n");
-        return str.substr(first, last - first + 1);
-    }
 };
-
-// Initialize static member
-std::unordered_map<std::string, std::string> EnvLoader::env_vars;
