@@ -119,3 +119,49 @@ docker-compose.override.yml
 # OS
 .DS_Store
 Thumbs.db
+
+# Node modules
+redis-cloud-studio/node_modules/
+redis-cloud-studio/dist/
+redis-cloud-studio/build/
+
+# Go modules
+redis-cloud-studio/auth/bin/
+redis-cloud-studio/auth/vendor/
+
+# Environment files
+redis-cloud-studio/auth/.env
+redis-cloud-studio/.env
+*.env
+
+# Build artifacts
+Backend/build/
+Backend/Release/
+node/build/
+node/Release/
+router/build/
+router/Release/
+
+# CMake
+**/CMakeFiles/
+**/cmake_install.cmake
+**/CMakeCache.txt
+**/*.vcxproj
+**/*.vcxproj.filters
+**/*.sln
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Uploads
+**/uploads/
+
+# Logs
+*.log
