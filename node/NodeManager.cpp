@@ -64,9 +64,28 @@ std::string RedisNode::set(const std::string& key, const std::string& value, int
     
     size_t newSize = key.size() + value.size() + sizeof(KVEntry);
     
-    if (!checkMemoryLimit(newSize)) {
-        evictLRU();
-        if (!checkMemoryLimit(newSize)) {
+    // Calculate current memory WITHOUT calling getMemoryUsage() (which would deadlock)
+    size_t currentMemory = 0;
+    for (const auto& [k, entry] : storage_) {
+        currentMemory += k.size() + entry.value.size() + sizeof(KVEntry);
+    }
+    
+    // Check if adding new entry would exceed limit
+    if ((currentMemory + newSize) > memoryLimitBytes_) {
+        // Try to evict one key
+        if (!storage_.empty()) {
+            std::cout << "[Node] Memory limit reached, evicting key: " << storage_.begin()->first << "\n";
+            storage_.erase(storage_.begin());
+        }
+        
+        // Recalculate after eviction
+        currentMemory = 0;
+        for (const auto& [k, entry] : storage_) {
+            currentMemory += k.size() + entry.value.size() + sizeof(KVEntry);
+        }
+        
+        // Still too large?
+        if ((currentMemory + newSize) > memoryLimitBytes_) {
             return "-ERR OOM command not allowed when used memory > 'maxmemory'\r\n";
         }
     }
@@ -161,18 +180,6 @@ size_t RedisNode::getKeyCount() const {
     return storage_.size();
 }
 
-bool RedisNode::checkMemoryLimit(size_t additionalBytes) {
-    return (getMemoryUsage() + additionalBytes) <= memoryLimitBytes_;
-}
-
-void RedisNode::evictLRU() {
-    // Simple eviction: remove first key (LRU would be more complex)
-    if (!storage_.empty()) {
-        std::cout << "[Node] Memory limit reached, evicting key: " << storage_.begin()->first << "\n";
-        storage_.erase(storage_.begin());
-    }
-}
-
 // ============= NodeManager Implementation =============
 
 NodeManager::NodeManager() {
@@ -223,7 +230,19 @@ std::shared_ptr<RedisNode> NodeManager::getNode(const std::string& tenantId) {
 }
 
 std::string NodeManager::executeCommand(const std::string& tenantId, const std::string& command) {
-    auto node = getNode(tenantId);
+    // Get node pointer WITHOUT using getNode() to avoid deadlock
+    std::shared_ptr<RedisNode> node;
+    
+    {
+        std::lock_guard<std::mutex> lock(nodesMutex_);
+        auto it = nodes_.find(tenantId);
+        if (it == nodes_.end()) {
+            return "-ERR tenant not found\r\n";
+        }
+        node = it->second;
+    }
+    // Mutex is released here - safe to proceed
+    
     if (!node) {
         return "-ERR tenant not found\r\n";
     }

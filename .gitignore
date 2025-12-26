@@ -87,7 +87,7 @@ secrets/
 *.pem
 *.crt
 *.p12
-
+node_modules
 # Database
 *.db
 *.sqlite
