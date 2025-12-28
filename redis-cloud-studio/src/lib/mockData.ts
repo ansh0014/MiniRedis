@@ -4,7 +4,6 @@ export const mockUser = {
   avatar: "JD"
 };
 
-export const mockApiKey = "sk_test_4eC39HqLyjWDarjtT1zdp7dc";
 
 export const mockMetrics = {
   memoryUsed: 32,
