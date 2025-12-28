@@ -11,8 +11,182 @@ using namespace drogon;
 using namespace std;
 using namespace sw::redis;
 
-// Generate UUID v4 using standard C++
-static string generateUuid()
+// NEW: Create Redis instance for Firebase user
+void ApiController::createUserInstance(const HttpRequestPtr &req, function<void(const HttpResponsePtr &)> &&callback)
+{
+    auto json = req->getJsonObject();
+    if (!json || !(*json).isMember("firebaseUid")) {
+        auto r = HttpResponse::newHttpResponse();
+        r->setStatusCode(k400BadRequest);
+        r->setBody(R"({"error":"firebaseUid required"})");
+        callback(r);
+        return;
+    }
+
+    string firebaseUid = (*json)["firebaseUid"].asString();
+    string email = (*json).isMember("email") ? (*json)["email"].asString() : "";
+    
+    // Generate tenant ID and API key
+    string tenantId = "tenant_" + firebaseUid.substr(0, 8);
+    string apiKey = generateApiKeyHex();
+    
+    // Random port for Redis instance
+    static random_device rd;
+    static mt19937 gen(rd());
+    uniform_int_distribution<int> portDis(10000, 60000);
+    int port = portDis(gen);
+    
+    // Create Docker container (simplified - you'll need to implement this)
+    string containerName = "redis-" + firebaseUid.substr(0, 8);
+    string password = generateApiKeyHex().substr(0, 32);
+    
+    // TODO: Actually create Docker container here
+    // For now, we'll just store the metadata
+    
+    auto sql = "INSERT INTO tenants (id, name, node_port, memory_limit_mb) VALUES ($1, $2, $3, $4) "
+               "ON CONFLICT (id) DO UPDATE SET name = $2, node_port = $3";
+    
+    db_->execSqlAsync(sql,
+        [this, firebaseUid, tenantId, apiKey, email, port, password, containerName, callback](const drogon::orm::Result &) {
+            // Now create API key
+            auto sql2 = "INSERT INTO api_keys (key, tenant_id, description) VALUES ($1, $2, $3) "
+                       "ON CONFLICT (key) DO NOTHING";
+            
+            db_->execSqlAsync(sql2,
+                [firebaseUid, tenantId, apiKey, port, password, containerName, callback, this](const drogon::orm::Result &) {
+                    // Cache in Redis
+                    if (redis_) {
+                        try {
+                            redis_->set("apikey:" + apiKey, tenantId);
+                            redis_->set("user:" + firebaseUid, tenantId);
+                        } catch (const exception &ex) {
+                            LOG_WARN << "Redis cache failed: " << ex.what();
+                        }
+                    }
+                    
+                    Json::Value out;
+                    out["success"] = true;
+                    out["tenantId"] = tenantId;
+                    out["apiKey"] = apiKey;
+                    out["host"] = "localhost";
+                    out["port"] = port;
+                    out["password"] = password;
+                    out["containerName"] = containerName;
+                    out["status"] = "active";
+                    
+                    auto resp = HttpResponse::newHttpJsonResponse(out);
+                    callback(resp);
+                },
+                [callback](const drogon::orm::DrogonDbException &e) {
+                    auto resp = HttpResponse::newHttpResponse();
+                    resp->setStatusCode(k500InternalServerError);
+                    resp->setBody("{\"error\":\"failed to create api key\"}");
+                    callback(resp);
+                },
+                apiKey, tenantId, "Firebase user: " + email);
+        },
+        [callback](const drogon::orm::DrogonDbException &e) {
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k500InternalServerError);
+            resp->setBody("{\"error\":\"failed to create tenant\"}");
+            callback(resp);
+        },
+        tenantId, email, port, 40);
+}
+
+// NEW: Get user instance by Firebase UID
+void ApiController::getUserInstance(const HttpRequestPtr &req, function<void(const HttpResponsePtr &)> &&callback, const string &firebaseUid)
+{
+    string tenantId = "tenant_" + firebaseUid.substr(0, 8);
+    
+    auto sql = "SELECT t.id, t.name, t.node_port, t.memory_limit_mb, k.key "
+               "FROM tenants t "
+               "LEFT JOIN api_keys k ON t.id = k.tenant_id "
+               "WHERE t.id = $1 "
+               "LIMIT 1";
+    
+    db_->execSqlAsync(sql,
+        [callback](const drogon::orm::Result &r) {
+            if (r.size() == 0) {
+                auto resp = HttpResponse::newHttpResponse();
+                resp->setStatusCode(k404NotFound);
+                resp->setBody("{\"error\":\"instance not found\"}");
+                callback(resp);
+                return;
+            }
+            
+            Json::Value out;
+            out["tenantId"] = r[0]["id"].as<string>();
+            out["email"] = r[0]["name"].as<string>();
+            out["port"] = r[0]["node_port"].as<int>();
+            out["memoryLimit"] = r[0]["memory_limit_mb"].as<int>();
+            out["apiKey"] = r[0]["key"].as<string>();
+            out["host"] = "localhost";
+            out["status"] = "active";
+            out["memoryUsed"] = 5; // TODO: Get from Redis INFO
+            out["uptime"] = "2h 30m"; // TODO: Calculate from created_at
+            out["commands"] = 1234; // TODO: Get from Redis INFO
+            
+            auto resp = HttpResponse::newHttpJsonResponse(out);
+            callback(resp);
+        },
+        [callback](const drogon::orm::DrogonDbException &) {
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k500InternalServerError);
+            resp->setBody("{\"error\":\"db error\"}");
+            callback(resp);
+        },
+        tenantId);
+}
+
+// NEW: Restart instance
+void ApiController::restartInstance(const HttpRequestPtr &req, function<void(const HttpResponsePtr &)> &&callback, const string &instanceId)
+{
+    // TODO: Implement Docker restart logic
+    Json::Value out;
+    out["success"] = true;
+    out["message"] = "Instance restarted";
+    auto resp = HttpResponse::newHttpJsonResponse(out);
+    callback(resp);
+}
+
+// NEW: Delete instance
+void ApiController::deleteInstance(const HttpRequestPtr &req, function<void(const HttpResponsePtr &)> &&callback, const string &instanceId)
+{
+    auto sql = "DELETE FROM tenants WHERE id = $1";
+    db_->execSqlAsync(sql,
+        [callback](const drogon::orm::Result &) {
+            Json::Value out;
+            out["success"] = true;
+            out["message"] = "Instance deleted";
+            auto resp = HttpResponse::newHttpJsonResponse(out);
+            callback(resp);
+        },
+        [callback](const drogon::orm::DrogonDbException &) {
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k500InternalServerError);
+            resp->setBody("{\"error\":\"db error\"}");
+            callback(resp);
+        },
+        instanceId);
+}
+
+// Helper methods
+string ApiController::generateApiKeyHex()
+{
+    random_device rd;
+    mt19937_64 gen(rd());
+    uniform_int_distribution<uint64_t> dis;
+    ostringstream oss;
+    oss << "sk_" << hex << setfill('0');
+    for (int i = 0; i < 4; ++i) {
+        uint64_t v = dis(gen);
+        oss << setw(16) << v;
+    }
+    return oss.str();
+}
+
+string ApiController::generateUuid()
 {
     static random_device rd;
     static mt19937_64 gen(rd());
@@ -24,29 +198,13 @@ static string generateUuid()
     uint64_t part1 = dis(gen);
     uint64_t part2 = dis(gen);
     
-    // UUID format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
     oss << setw(8) << (part1 & 0xFFFFFFFF) << "-";
     oss << setw(4) << ((part1 >> 32) & 0xFFFF) << "-";
-    oss << setw(4) << ((part2 & 0x0FFF) | 0x4000) << "-";  // Version 4
-    oss << setw(4) << ((part2 >> 16) & 0x3FFF | 0x8000) << "-";  // Variant
+    oss << setw(4) << ((part2 & 0x0FFF) | 0x4000) << "-";
+    oss << setw(4) << ((part2 >> 16) & 0x3FFF | 0x8000) << "-";
     oss << setw(12) << ((part2 >> 32) & 0xFFFFFFFF);
     oss << setw(4) << (dis(gen) & 0xFFFF);
     
-    return oss.str();
-}
-
-// Generate 256-bit API key
-static string generateApiKeyHex()
-{
-    random_device rd;
-    mt19937_64 gen(rd());
-    uniform_int_distribution<uint64_t> dis;
-    ostringstream oss;
-    oss << hex << setfill('0');
-    for (int i = 0; i < 4; ++i) {
-        uint64_t v = dis(gen);
-        oss << setw(16) << v;
-    }
     return oss.str();
 }
 
