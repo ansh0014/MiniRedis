@@ -112,7 +112,9 @@ obj/
 # Logs
 logs/
 *.log
-
+# firebase json file
+firebase-service-account.json
+./firebase-service-account.json
 # Docker
 docker-compose.override.yml
 
@@ -155,6 +157,7 @@ router/Release/
 .idea/
 *.suo
 *.user
+
 
 # OS
 .DS_Store
