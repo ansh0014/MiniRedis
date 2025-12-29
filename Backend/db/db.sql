@@ -1,11 +1,11 @@
--- Enable UUID extension
+
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Drop existing tables if they exist
+
 DROP TABLE IF EXISTS api_keys CASCADE;
 DROP TABLE IF EXISTS tenants CASCADE;
 
--- Create tenants table
+
 CREATE TABLE tenants (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
@@ -22,10 +22,10 @@ CREATE TABLE api_keys (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
--- Create index for faster lookups
+
 CREATE INDEX idx_api_keys_tenant ON api_keys(tenant_id);
 
--- Insert sample tenants for testing
+
 INSERT INTO tenants (id, name, node_port, memory_limit_mb) VALUES 
   (uuid_generate_v4(), 'Acme Corporation', 6379, 40),
   (uuid_generate_v4(), 'Tech Startup Inc', 6380, 50),
