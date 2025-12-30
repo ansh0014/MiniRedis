@@ -168,3 +168,5 @@ Thumbs.db
 
 # Logs
 *.log
+!redis-cloud-studio/auth/go.mod
+!redis-cloud-studio/auth/go.sum
