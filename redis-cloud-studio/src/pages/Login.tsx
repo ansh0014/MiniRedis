@@ -13,7 +13,7 @@ const Login = () => {
     setLoading(true);
 
     try {
-      console.log("🔐 Starting Google login...");
+      console.log(" Starting Google login...");
       
       const userData = await signInWithGoogle();
       
@@ -27,7 +27,7 @@ const Login = () => {
       
       localStorage.setItem("user", JSON.stringify(safeData));
       
-      console.log("✅ Login successful:", userData);
+      console.log(" Login successful:", userData);
       
       toast.success(`Welcome, ${userData.name}!`);
       
@@ -36,7 +36,7 @@ const Login = () => {
       }, 500);
       
     } catch (err: any) {
-      console.error("❌ Login failed:", err);
+      console.error(" Login failed:", err);
       
       const errorMessage = err.message || "Failed to sign in. Please try again.";
       toast.error(errorMessage);

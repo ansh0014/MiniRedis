@@ -4,25 +4,25 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
 	firebase "firebase.google.com/go/v4"
-	fbauth "firebase.google.com/go/v4/auth"
+	"firebase.google.com/go/v4/auth"
 	"github.com/joho/godotenv"
-	"google.golang.org/api/option"
-
 	_ "github.com/lib/pq"
+	"google.golang.org/api/option"
 )
 
 var (
-	FirebaseAuth *fbauth.Client
+	FirebaseAuth *auth.Client
 	DB           *sql.DB
 )
 
-// LoadEnv loads .env file
+
 func LoadEnv() error {
-	// Try multiple paths
+	
 	paths := []string{".env", "../.env", "../../.env"}
 
 	for _, path := range paths {
@@ -37,68 +37,53 @@ func LoadEnv() error {
 	return nil
 }
 
-// InitFirebase initializes Firebase Admin SDK
-func InitFirebase() error {
-	ctx := context.Background()
 
-	credFile := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
-	if credFile == "" {
-		return fmt.Errorf("GOOGLE_APPLICATION_CREDENTIALS not set")
-	}
-
-	if _, err := os.Stat(credFile); os.IsNotExist(err) {
-		return fmt.Errorf("firebase credentials file not found: %s", credFile)
-	}
-
-	opt := option.WithCredentialsFile(credFile)
-	app, err := firebase.NewApp(ctx, nil, opt)
+func InitFirebase() {
+	opt := option.WithCredentialsFile("firebase-service-account.json")
+	app, err := firebase.NewApp(context.Background(), nil, opt)
 	if err != nil {
-		return fmt.Errorf("firebase NewApp: %w", err)
+		log.Fatalf(" Firebase init error: %v\n", err)
 	}
 
-	authClient, err := app.Auth(ctx)
+	FirebaseAuth, err = app.Auth(context.Background())
 	if err != nil {
-		return fmt.Errorf("firebase auth client: %w", err)
+		log.Fatalf(" Firebase Auth error: %v\n", err)
 	}
-
-	FirebaseAuth = authClient;
-	return nil
+}
+func InitFirebasekey(){
+	log.Println(" Initializing Firebase with API Key...")
+	if err := LoadEnv(); err != nil {
+		log.Fatalf(" Error loading .env file: %v\n", err)
+	}
 }
 
-// InitDatabase connects to PostgreSQL (auth database only)
-func InitDatabase() error {
-	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		getEnvOrDefault("DB_HOST", "localhost"),
-		getEnvOrDefault("DB_PORT", "5432"),
-		getEnvOrDefault("DB_USER", "postgres"),
+
+func InitDatabase() {
+	connStr := fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		os.Getenv("DB_HOST"),
+		os.Getenv("DB_PORT"),
+		os.Getenv("DB_USER"),
 		os.Getenv("DB_PASSWORD"),
-		getEnvOrDefault("DB_NAME", "auth_db"), // ← Separate database for auth
+		os.Getenv("DB_NAME"),
 	)
 
-	db, err := sql.Open("postgres", connStr)
+	var err error
+	DB, err = sql.Open("postgres", connStr)
 	if err != nil {
-		return fmt.Errorf("failed to connect: %w", err)
+		log.Fatalf(" Database connection error: %v\n", err)
 	}
 
-	if err := db.Ping(); err != nil {
-		return fmt.Errorf("failed to ping database: %w", err)
+	if err = DB.Ping(); err != nil {
+		log.Fatalf(" Database ping error: %v\n", err)
 	}
 
-	DB = db
 	fmt.Println(" Database connected")
-	return nil
 }
 
 // Close closes database connection
-func Close() {
+func CloseDatabase() {
 	if DB != nil {
 		DB.Close()
 	}
-}
-
-func getEnvOrDefault(key, defaultVal string) string {
-	if val := os.Getenv(key); val != "" {
-		return val
-	}
-	return defaultVal
 }

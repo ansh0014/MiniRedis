@@ -1,15 +1,13 @@
 cmake_minimum_required(VERSION 3.10)
-project(miniredis_node CXX)
+project(miniredis_node)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Suppress CMake policy warnings (ADD THIS!)
-if(POLICY CMP0167)
-    cmake_policy(SET CMP0167 NEW)
-endif()
+# Set vcpkg toolchain file
+set(CMAKE_TOOLCHAIN_FILE "D:/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "Vcpkg toolchain file")
 
-# Find Drogon
+# Find required packages
 find_package(Drogon CONFIG REQUIRED)
 
 # Source files
@@ -20,31 +18,17 @@ set(SOURCES
 )
 
 # Create executable
-add_executable(${PROJECT_NAME} ${SOURCES})
-
-# Include directories
-target_include_directories(${PROJECT_NAME} PRIVATE 
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/../config
-)
-
-# Compiler-specific flags
-if(MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE 
-        /W4
-        /permissive-
-        /Zc:__cplusplus
-    )
-endif()
+add_executable(miniredis_node ${SOURCES})
 
 # Link libraries
-target_link_libraries(${PROJECT_NAME} PRIVATE 
+target_link_libraries(miniredis_node PRIVATE 
     Drogon::Drogon
 )
 
-# Platform-specific libraries
-if(WIN32)
-    target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32 wsock32)
-else()
-    target_link_libraries(${PROJECT_NAME} PRIVATE pthread)
-endif()
+# Include config directory
+target_include_directories(miniredis_node PRIVATE 
+    ${CMAKE_SOURCE_DIR}/../config
+)
+
+# Copy .env file to build directory
+configure_file(${CMAKE_SOURCE_DIR}/../.env ${CMAKE_BINARY_DIR}/.env COPYONLY)

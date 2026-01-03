@@ -16,7 +16,7 @@ public:
 
         std::string line;
         while (std::getline(file, line)) {
-            // Skip empty lines and comments
+         
             if (line.empty() || line[0] == '#') continue;
             
             size_t pos = line.find('=');
@@ -24,7 +24,7 @@ public:
                 std::string key = line.substr(0, pos);
                 std::string value = line.substr(pos + 1);
                 
-                // Trim whitespace
+                
                 key.erase(0, key.find_first_not_of(" \t\r\n"));
                 key.erase(key.find_last_not_of(" \t\r\n") + 1);
                 value.erase(0, value.find_first_not_of(" \t\r\n"));
@@ -42,7 +42,7 @@ public:
         if (it != env_vars.end()) {
             return it->second;
         }
-        // Fallback to system environment
+
         const char* val = std::getenv(key.c_str());
         return val ? std::string(val) : defaultValue;
     }

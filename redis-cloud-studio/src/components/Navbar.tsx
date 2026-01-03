@@ -1,23 +1,38 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Database, LogOut, Settings, User } from "lucide-react";
-import { mockUser } from "@/lib/mockData";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Database, LogOut, Settings, User as UserIcon } from "lucide-react";
+import { ThemeToggle } from "./ThemeToggle";
+import { api, type User } from "@/lib/api";
+import { toast } from "sonner";
 
 interface NavbarProps {
-  isAuthenticated?: boolean;
+  user: User | null;
 }
 
-const Navbar = ({ isAuthenticated = false }: NavbarProps) => {
+export default function Navbar({ user }: NavbarProps) {
+  const navigate = useNavigate();
   const location = useLocation();
   const isLanding = location.pathname === "/";
+
+  const handleLogout = async () => {
+    try {
+      await api.logout();
+      toast.success("Logged out successfully");
+      navigate("/login");
+    } catch (error) {
+      console.error("Logout error:", error);
+      navigate("/login");
+    }
+  };
 
   return (
     <nav className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/80 backdrop-blur-xl">
@@ -30,37 +45,39 @@ const Navbar = ({ isAuthenticated = false }: NavbarProps) => {
         </Link>
 
         <div className="flex items-center gap-4">
-          {isAuthenticated ? (
+          <ThemeToggle />
+          {user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="flex items-center gap-2">
-                  <Avatar className="h-8 w-8">
-                    <AvatarFallback className="bg-primary/10 text-primary text-sm font-medium">
-                      {mockUser.avatar}
+                <Button variant="ghost" className="relative h-10 w-10 rounded-full">
+                  <Avatar>
+                    <AvatarImage src={user.picture} alt={user.name || user.email} />
+                    <AvatarFallback>
+                      {user.email.charAt(0).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
-                  <span className="hidden md:inline">{mockUser.name}</span>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem asChild>
-                  <Link to="/dashboard" className="flex items-center gap-2 cursor-pointer">
-                    <User className="h-4 w-4" />
-                    Dashboard
-                  </Link>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>
+                  <div className="flex flex-col space-y-1">
+                    <p className="text-sm font-medium">{user.name || "User"}</p>
+                    <p className="text-xs text-muted-foreground">{user.email}</p>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => navigate("/dashboard")}>
+                  <UserIcon className="mr-2 h-4 w-4" />
+                  Dashboard
                 </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/settings" className="flex items-center gap-2 cursor-pointer">
-                    <Settings className="h-4 w-4" />
-                    Settings
-                  </Link>
+                <DropdownMenuItem onClick={() => navigate("/settings")}>
+                  <Settings className="mr-2 h-4 w-4" />
+                  Settings
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <Link to="/" className="flex items-center gap-2 cursor-pointer text-destructive">
-                    <LogOut className="h-4 w-4" />
-                    Logout
-                  </Link>
+                <DropdownMenuItem onClick={handleLogout}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Log out
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -90,6 +107,4 @@ const Navbar = ({ isAuthenticated = false }: NavbarProps) => {
       </div>
     </nav>
   );
-};
-
-export default Navbar;
+}

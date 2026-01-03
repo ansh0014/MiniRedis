@@ -8,13 +8,16 @@
 #include <chrono>
 #include <vector>
 
+// Forward declaration
+class NodeManager;
+
 // Key-Value entry with TTL support
 struct KVEntry {
     std::string value;
     std::chrono::steady_clock::time_point expiry;
     bool hasExpiry;
     
-    // ADD DEFAULT CONSTRUCTOR
+    // Default constructor
     KVEntry() : value(""), hasExpiry(false) {}
     
     KVEntry(const std::string& val) 
@@ -56,6 +59,9 @@ public:
     void stop();
 
 private:
+    // ✅ ADD THIS LINE - Allow NodeManager to access private members
+    friend class NodeManager;
+    
     std::string tenantId_;
     int port_;
     size_t memoryLimitBytes_;
@@ -80,21 +86,13 @@ public:
     NodeManager();
     ~NodeManager();
 
-    // Start a node for tenant
     bool startNode(const std::string& tenantId, int port, int memoryLimitMb = 40);
-    
-    // Stop a node
     bool stopNode(const std::string& tenantId);
     
-    // Get node by tenant ID
     std::shared_ptr<RedisNode> getNode(const std::string& tenantId);
     
-    // Execute Redis command on tenant's node
     std::string executeCommand(const std::string& tenantId, const std::string& command);
-    
-    // List all nodes
     std::vector<std::string> listNodes();
-    
     void stopAllNodes();
 
 private:

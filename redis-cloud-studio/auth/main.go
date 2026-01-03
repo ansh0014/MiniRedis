@@ -1,87 +1,38 @@
 package main
 
 import (
+	"auth/config"
+	"auth/router"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
-	"auth/config"
-	"auth/router"
-
-	"github.com/gorilla/handlers"
+	"github.com/joho/godotenv"
+	"github.com/rs/cors"
 )
 
 func main() {
-	fmt.Println("🚀 Starting MiniRedis Auth Service...")
+	fmt.Println(" Starting Auth Service...")
 
-	// Load environment variables
-	if err := config.LoadEnv(); err != nil {
-		log.Printf("⚠️  Failed to load .env: %v", err)
-	}
 
-	// Initialize Firebase
-	if err := config.InitFirebase(); err != nil {
-		log.Fatalf(" Firebase initialization failed: %v", err)
-	}
+	godotenv.Load()
 
-	// Initialize Database
-	if err := config.InitDatabase(); err != nil {
-		log.Fatalf(" Database initialization failed: %v", err)
-	}
-	defer config.Close()
 
-	// Setup router
-	r := router.NewAuthRouter()
+	config.InitFirebase()
+	config.InitDatabase()
+	defer config.CloseDatabase()
 
-	// CORS configuration
-	corsHandler := handlers.CORS(
-		handlers.AllowedOrigins([]string{
-			"http://localhost:5173",
-			"http://localhost:3000",
-			"http://localhost:8080",
-		}),
-		handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}),
-		handlers.AllowedHeaders([]string{"Content-Type", "Authorization"}),
-		handlers.AllowCredentials(),
-	)(r)
 
-	// Server configuration
-	port := getEnvOrDefault("AUTH_SERVICE_PORT", "8000")
-	srv := &http.Server{
-		Addr:         ":" + port,
-		Handler:      corsHandler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
+	r := router.SetupRouter()
 
-	// Start server in goroutine
-	go func() {
-		fmt.Printf(" Auth Service running on http://localhost:%s\n", port)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("❌ Server failed: %v", err)
-		}
-	}()
 
-	// Graceful shutdown
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	c := cors.New(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:5173", "http://localhost:8080"},
+		AllowedMethods:   []string{"GET", "POST", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Content-Type", "Cookie"},
+		AllowCredentials: true,
+	})
 
-	fmt.Println("\n Shutting down server...")
-	if err := srv.Close(); err != nil {
-		log.Printf("  Server shutdown error: %v", err)
-	}
-	fmt.Println("Server stopped")
-}
-
-func getEnvOrDefault(key, defaultVal string) string {
-	if val := os.Getenv(key); val != "" {
-		return val
-	}
-	return defaultVal
+	fmt.Println(" Auth Service running on http://localhost:8000")
+	log.Fatal(http.ListenAndServe(":8000", c.Handler(r)))
 }

@@ -2,9 +2,6 @@
 #include <iostream>
 #include <sstream>
 #include <algorithm>
-#include <cstring>
-
-// ============= RedisNode Implementation =============
 
 RedisNode::RedisNode(const std::string& tenantId, int port, int memoryLimitMb)
     : tenantId_(tenantId), 
@@ -21,13 +18,7 @@ void RedisNode::start() {
     if (running_) return;
     
     running_ = true;
-    
-    // Start TTL sweeper thread
     sweeperThread_ = std::thread(&RedisNode::ttlSweeperLoop, this);
-    
-    std::cout << "[Node] Started node for tenant: " << tenantId_ 
-              << " on port " << port_ 
-              << " (Memory limit: " << (memoryLimitBytes_ / 1024 / 1024) << "MB)\n";
 }
 
 void RedisNode::stop() {
@@ -38,8 +29,6 @@ void RedisNode::stop() {
     if (sweeperThread_.joinable()) {
         sweeperThread_.join();
     }
-    
-    std::cout << "[Node] Stopped node for tenant: " << tenantId_ << "\n";
 }
 
 void RedisNode::ttlSweeperLoop() {
@@ -48,7 +37,6 @@ void RedisNode::ttlSweeperLoop() {
         
         std::lock_guard<std::mutex> lock(storageMutex_);
         
-        // Remove expired keys
         for (auto it = storage_.begin(); it != storage_.end();) {
             if (it->second.isExpired()) {
                 it = storage_.erase(it);
@@ -64,27 +52,21 @@ std::string RedisNode::set(const std::string& key, const std::string& value, int
     
     size_t newSize = key.size() + value.size() + sizeof(KVEntry);
     
-    // Calculate current memory WITHOUT calling getMemoryUsage() (which would deadlock)
     size_t currentMemory = 0;
     for (const auto& [k, entry] : storage_) {
         currentMemory += k.size() + entry.value.size() + sizeof(KVEntry);
     }
     
-    // Check if adding new entry would exceed limit
     if ((currentMemory + newSize) > memoryLimitBytes_) {
-        // Try to evict one key
         if (!storage_.empty()) {
-            std::cout << "[Node] Memory limit reached, evicting key: " << storage_.begin()->first << "\n";
             storage_.erase(storage_.begin());
         }
         
-        // Recalculate after eviction
         currentMemory = 0;
         for (const auto& [k, entry] : storage_) {
             currentMemory += k.size() + entry.value.size() + sizeof(KVEntry);
         }
         
-        // Still too large?
         if ((currentMemory + newSize) > memoryLimitBytes_) {
             return "-ERR OOM command not allowed when used memory > 'maxmemory'\r\n";
         }
@@ -104,7 +86,7 @@ std::string RedisNode::get(const std::string& key) {
     
     auto it = storage_.find(key);
     if (it == storage_.end()) {
-        return "$-1\r\n"; // Null bulk reply
+        return "$-1\r\n";
     }
     
     if (it->second.isExpired()) {
@@ -140,7 +122,6 @@ std::string RedisNode::keys(const std::string& pattern) {
     
     for (const auto& [key, entry] : storage_) {
         if (!entry.isExpired()) {
-            // Simple pattern matching (* = all)
             if (pattern == "*") {
                 matchedKeys.push_back(key);
             }
@@ -180,11 +161,7 @@ size_t RedisNode::getKeyCount() const {
     return storage_.size();
 }
 
-// ============= NodeManager Implementation =============
-
-NodeManager::NodeManager() {
-    std::cout << "[NodeManager] Initialized\n";
-}
+NodeManager::NodeManager() {}
 
 NodeManager::~NodeManager() {
     stopAllNodes();
@@ -194,7 +171,6 @@ bool NodeManager::startNode(const std::string& tenantId, int port, int memoryLim
     std::lock_guard<std::mutex> lock(nodesMutex_);
     
     if (nodes_.find(tenantId) != nodes_.end()) {
-        std::cout << "[NodeManager] Node already exists for tenant: " << tenantId << "\n";
         return true;
     }
     
@@ -210,7 +186,6 @@ bool NodeManager::stopNode(const std::string& tenantId) {
     
     auto it = nodes_.find(tenantId);
     if (it == nodes_.end()) {
-        std::cerr << "[NodeManager] Node not found: " << tenantId << "\n";
         return false;
     }
     
@@ -230,7 +205,6 @@ std::shared_ptr<RedisNode> NodeManager::getNode(const std::string& tenantId) {
 }
 
 std::string NodeManager::executeCommand(const std::string& tenantId, const std::string& command) {
-    // Get node pointer WITHOUT using getNode() to avoid deadlock
     std::shared_ptr<RedisNode> node;
     
     {
@@ -241,18 +215,15 @@ std::string NodeManager::executeCommand(const std::string& tenantId, const std::
         }
         node = it->second;
     }
-    // Mutex is released here - safe to proceed
     
     if (!node) {
         return "-ERR tenant not found\r\n";
     }
     
-    // Parse Redis command
     std::istringstream iss(command);
     std::string cmd;
     iss >> cmd;
     
-    // Convert to uppercase
     std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::toupper);
     
     if (cmd == "SET") {
@@ -260,7 +231,6 @@ std::string NodeManager::executeCommand(const std::string& tenantId, const std::
         int ttl = 0;
         iss >> key >> value;
         
-        // Check for EX (TTL in seconds)
         std::string ttlFlag;
         if (iss >> ttlFlag) {
             std::transform(ttlFlag.begin(), ttlFlag.end(), ttlFlag.begin(), ::toupper);
@@ -285,6 +255,130 @@ std::string NodeManager::executeCommand(const std::string& tenantId, const std::
         std::string key;
         iss >> key;
         return node->exists(key);
+        
+    } else if (cmd == "INCR") {
+        std::string key;
+        iss >> key;
+        if (key.empty()) {
+            return "-ERR wrong number of arguments for 'incr' command\r\n";
+        }
+        
+        std::lock_guard<std::mutex> lock(node->storageMutex_);
+        auto it = node->storage_.find(key);
+        int value = 0;
+        
+        if (it != node->storage_.end()) {
+            if (it->second.isExpired()) {
+                node->storage_.erase(it);
+            } else {
+                try {
+                    value = std::stoi(it->second.value);
+                } catch (...) {
+                    return "-ERR value is not an integer or out of range\r\n";
+                }
+            }
+        }
+        
+        value++;
+        node->storage_[key] = KVEntry(std::to_string(value));
+        return ":" + std::to_string(value) + "\r\n";
+        
+    } else if (cmd == "DECR") {
+        std::string key;
+        iss >> key;
+        if (key.empty()) {
+            return "-ERR wrong number of arguments for 'decr' command\r\n";
+        }
+        
+        std::lock_guard<std::mutex> lock(node->storageMutex_);
+        auto it = node->storage_.find(key);
+        int value = 0;
+        
+        if (it != node->storage_.end()) {
+            if (it->second.isExpired()) {
+                node->storage_.erase(it);
+            } else {
+                try {
+                    value = std::stoi(it->second.value);
+                } catch (...) {
+                    return "-ERR value is not an integer or out of range\r\n";
+                }
+            }
+        }
+        
+        value--;
+        node->storage_[key] = KVEntry(std::to_string(value));
+        return ":" + std::to_string(value) + "\r\n";
+        
+    } else if (cmd == "INCRBY") {
+        std::string key, incrementStr;
+        iss >> key >> incrementStr;
+        
+        if (key.empty() || incrementStr.empty()) {
+            return "-ERR wrong number of arguments for 'incrby' command\r\n";
+        }
+        
+        int increment;
+        try {
+            increment = std::stoi(incrementStr);
+        } catch (...) {
+            return "-ERR value is not an integer or out of range\r\n";
+        }
+        
+        std::lock_guard<std::mutex> lock(node->storageMutex_);
+        auto it = node->storage_.find(key);
+        int value = 0;
+        
+        if (it != node->storage_.end()) {
+            if (it->second.isExpired()) {
+                node->storage_.erase(it);
+            } else {
+                try {
+                    value = std::stoi(it->second.value);
+                } catch (...) {
+                    return "-ERR value is not an integer or out of range\r\n";
+                }
+            }
+        }
+        
+        value += increment;
+        node->storage_[key] = KVEntry(std::to_string(value));
+        return ":" + std::to_string(value) + "\r\n";
+        
+    } else if (cmd == "DECRBY") {
+        std::string key, decrementStr;
+        iss >> key >> decrementStr;
+        
+        if (key.empty() || decrementStr.empty()) {
+            return "-ERR wrong number of arguments for 'decrby' command\r\n";
+        }
+        
+        int decrement;
+        try {
+            decrement = std::stoi(decrementStr);
+        } catch (...) {
+            return "-ERR value is not an integer or out of range\r\n";
+        }
+        
+        std::lock_guard<std::mutex> lock(node->storageMutex_);
+        auto it = node->storage_.find(key);
+        int value = 0;
+        
+        if (it != node->storage_.end()) {
+            if (it->second.isExpired()) {
+                node->storage_.erase(it);
+            } else {
+                try {
+                    value = std::stoi(it->second.value);
+                } catch (...) {
+                    return "-ERR value is not an integer or out of range\r\n";
+                }
+            }
+        }
+        
+        value -= decrement;
+        node->storage_[key] = KVEntry(std::to_string(value));
+        return ":" + std::to_string(value) + "\r\n";
         
     } else if (cmd == "KEYS") {
         std::string pattern;
@@ -322,7 +416,6 @@ std::vector<std::string> NodeManager::listNodes() {
 void NodeManager::stopAllNodes() {
     std::lock_guard<std::mutex> lock(nodesMutex_);
     
-    std::cout << "[NodeManager] Stopping all nodes...\n";
     for (auto& [tenantId, node] : nodes_) {
         node->stop();
     }

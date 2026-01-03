@@ -2,10 +2,12 @@ package middleware
 
 import (
 	"context"
-	"fmt"
 	"net/http"
+	"strings"
 
 	"auth/config"
+
+	fbauth "firebase.google.com/go/v4/auth"
 )
 
 type ctxKey string
@@ -15,45 +17,64 @@ const firebaseUserKey ctxKey = "firebaseUser"
 // FirebaseAuthMiddleware verifies Firebase token from session cookie
 func FirebaseAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Get session token from cookie
-		cookie, err := r.Cookie("session_token")
+		var tokenStr string
+
+		// Method 1: Parse from Cookie header string
+		cookieHeader := r.Header.Get("Cookie")
+		if cookieHeader != "" {
+			for _, cookie := range strings.Split(cookieHeader, ";") {
+				parts := strings.SplitN(strings.TrimSpace(cookie), "=", 2)
+				if len(parts) == 2 && parts[0] == "session_token" {
+					tokenStr = parts[1]
+					break
+				}
+			}
+		}
+
+		// Method 2: Fallback to http.Cookie
+		if tokenStr == "" {
+			c, err := r.Cookie("session_token")
+			if err == nil {
+				tokenStr = c.Value
+			}
+		}
+
+		if tokenStr == "" {
+			w.Header().Set("Content-Type", "application/json")
+			http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+
+		// Verify token with Firebase
+		verifiedToken, err := config.FirebaseAuth.VerifyIDToken(r.Context(), tokenStr)
 		if err != nil {
-			http.Error(w, `{"error":"unauthorized - no session cookie"}`, http.StatusUnauthorized)
+			w.Header().Set("Content-Type", "application/json")
+			http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
 
-		if cookie.Value == "" {
-			http.Error(w, `{"error":"unauthorized - empty session token"}`, http.StatusUnauthorized)
-			return
-		}
-
-		// Verify Firebase ID token
-		token, err := config.FirebaseAuth.VerifyIDToken(r.Context(), cookie.Value)
-		if err != nil {
-			fmt.Printf("❌ Token verification failed: %v\n", err)
-			http.Error(w, `{"error":"unauthorized - invalid token"}`, http.StatusUnauthorized)
-			return
-		}
-
-		// Add token to context
-		ctx := context.WithValue(r.Context(), "firebaseUser", token)
+		// Store token in context
+		ctx := context.WithValue(r.Context(), firebaseUserKey, verifiedToken)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// FromContext returns verified Firebase token (auth.Token) or nil.
-func FromContext(ctx context.Context) *configToken {
+// FromContext returns verified Firebase token or nil
+func FromContext(ctx context.Context) *fbauth.Token {
 	tok := ctx.Value(firebaseUserKey)
 	if tok == nil {
 		return nil
 	}
-	claims, ok := tok.(*configToken)
+	token, ok := tok.(*fbauth.Token)
 	if !ok {
 		return nil
 	}
-	return claims
+	return token
 }
 
-// helper type alias to avoid importing firebase auth inside other packages
-type configToken = interface { /* firebase.Token-like */
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

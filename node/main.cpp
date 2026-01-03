@@ -29,9 +29,28 @@ int main() {
             [](const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback) {
                 auto json = req->getJsonObject();
                 
+                // Log received data
+                std::cout << "[NodeManager] Received start request:" << std::endl;
+                std::cout << "  Raw JSON: " << json->toStyledString() << std::endl;
+                
+                if (!json->isMember("tenant_id") || !json->isMember("port")) {
+                    std::cout << "[NodeManager] ❌ Missing required fields!" << std::endl;
+                    Json::Value error;
+                    error["error"] = "Missing tenant_id or port";
+                    auto resp = HttpResponse::newHttpJsonResponse(error);
+                    resp->setStatusCode(k400BadRequest);
+                    callback(resp);
+                    return;
+                }
+                
                 std::string tenantId = (*json)["tenant_id"].asString();
                 int port = (*json)["port"].asInt();
                 int memoryMb = (*json).get("memory_limit_mb", 40).asInt();
+
+                std::cout << "[NodeManager] Starting node:" << std::endl;
+                std::cout << "  Tenant ID: " << tenantId << std::endl;
+                std::cout << "  Port: " << port << std::endl;
+                std::cout << "  Memory: " << memoryMb << "MB" << std::endl;
 
                 bool success = nodeManager->startNode(tenantId, port, memoryMb);
 
@@ -43,6 +62,9 @@ int main() {
 
                 auto resp = HttpResponse::newHttpJsonResponse(response);
                 resp->setStatusCode(success ? k200OK : k500InternalServerError);
+                
+                std::cout << "[NodeManager] " << (success ? "✅ Node started" : "❌ Failed to start node") << std::endl;
+                
                 callback(resp);
             },
             {Post}
@@ -53,13 +75,23 @@ int main() {
             "/node/execute",
             [](const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback) {
                 auto json = req->getJsonObject();
+                
+                std::cout << "[NodeManager] Execute request:" << std::endl;
+                std::cout << "  Raw JSON: " << json->toStyledString() << std::endl;
+                
                 std::string tenantId = (*json)["tenant_id"].asString();
                 std::string command = (*json)["command"].asString();
 
+                std::cout << "[NodeManager] Executing for tenant: " << tenantId << std::endl;
+                std::cout << "[NodeManager] Command: " << command << std::endl;
+
                 std::string result = nodeManager->executeCommand(tenantId, command);
+
+                std::cout << "[NodeManager] Result: " << result << std::endl;
 
                 auto resp = HttpResponse::newHttpResponse();
                 resp->setBody(result);
+                resp->setContentTypeCode(CT_TEXT_PLAIN);
                 callback(resp);
             },
             {Post}
@@ -83,15 +115,34 @@ int main() {
             {Post}
         );
 
-        // Endpoint: List nodes
+        // Endpoint: List nodes - UPDATED TO RETURN FULL INFO
         app().registerHandler(
             "/node/list",
             [](const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback) {
-                auto nodes = nodeManager->listNodes();
+                auto tenantIds = nodeManager->listNodes();
                 
                 Json::Value response(Json::arrayValue);
-                for (const auto& tenantId : nodes) {
-                    response.append(tenantId);
+                
+                for (const auto& tenantId : tenantIds) {
+                    auto node = nodeManager->getNode(tenantId);
+                    if (node) {
+                        Json::Value nodeInfo;
+                        nodeInfo["tenant_id"] = tenantId;
+                        nodeInfo["port"] = node->getPort();
+                        nodeInfo["status"] = node->isRunning() ? "running" : "stopped";
+                        nodeInfo["memory_used"] = (int)node->getMemoryUsage();
+                        nodeInfo["key_count"] = (int)node->getKeyCount();
+                        
+                        // Add ISO timestamp (current time for now)
+                        auto now = std::chrono::system_clock::now();
+                        auto time_t_now = std::chrono::system_clock::to_time_t(now);
+                        char buffer[100];
+                        std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S.000Z", 
+                                    std::gmtime(&time_t_now));
+                        nodeInfo["created_at"] = std::string(buffer);
+                        
+                        response.append(nodeInfo);
+                    }
                 }
 
                 auto resp = HttpResponse::newHttpJsonResponse(response);
