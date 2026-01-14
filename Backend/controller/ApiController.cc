@@ -69,8 +69,8 @@ ApiController::ApiController()
 
 int ApiController::findAvailablePort()
 {
-    int startPort = 6380;
-    int maxPort = 6480; 
+    int startPort = 6001;
+    int maxPort = 6999; 
     
     auto sql = "SELECT node_port FROM tenants ORDER BY node_port";
     auto result = db_->execSqlSync(sql);
@@ -117,7 +117,7 @@ void ApiController::createTenant(const HttpRequestPtr& req, function<void(const 
     }
 
     cout << "[Backend] Creating tenant: " << name << endl;
-    cout << "[Backend]   Firebase UID: " << firebaseUid << endl;
+ 
     cout << "[Backend]   Port: " << nodePort << " (auto-assigned)" << endl;
     cout << "[Backend]   Memory: " << memoryMb << "MB" << endl;
 

@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	firebase "firebase.google.com/go/v4"
+	"firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/auth"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"

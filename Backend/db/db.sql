@@ -1,10 +1,18 @@
-
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 
-DROP TABLE IF EXISTS rate_limits CASCADE;
-DROP TABLE IF EXISTS api_keys CASCADE;
-DROP TABLE IF EXISTS tenants CASCADE;
+CREATE TABLE node_metrics (
+    tenant_id UUID PRIMARY KEY,
+    key_count INT DEFAULT 0,
+    memory_bytes BIGINT DEFAULT 0,
+    memory_usage_percent FLOAT DEFAULT 0,
+    ops_per_sec INT DEFAULT 0,
+    connected_clients INT DEFAULT 0,
+    uptime_seconds INT DEFAULT 0,
+    status VARCHAR(20) DEFAULT 'stopped',
+    last_updated TIMESTAMP DEFAULT NOW()
+);
+
 
 
 CREATE TABLE tenants (

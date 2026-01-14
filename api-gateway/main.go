@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	
 
 	"github.com/gorilla/mux"
 )
@@ -251,6 +252,8 @@ func main() {
 
 		nodeProxy.ServeHTTP(w, r)
 	})).Methods("GET", "POST", "DELETE", "OPTIONS")
+
+	registerMonitoringRoutes(r)
 
 	log.SetOutput(os.Stdout)
 	log.Println("API Gateway running on :8080")

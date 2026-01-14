@@ -1,0 +1,51 @@
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+
+type Theme = 'dark' | 'light';
+
+interface ThemeContextType {
+  theme: Theme;
+  toggleTheme: () => void;
+}
+
+const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
+  const [theme, setTheme] = useState<Theme>(() => {
+    const stored = localStorage.getItem('theme');
+    return (stored as Theme) || 'dark';
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    
+    // Remove both classes first
+    root.classList.remove('theme-dark', 'theme-light');
+    
+    // Add the current theme class
+    root.classList.add(`theme-${theme}`);
+    
+    // Store in localStorage
+    localStorage.setItem('theme', theme);
+    
+    // Force repaint
+    void root.offsetHeight;
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  };
+
+  return (
+    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+
+export function useTheme() {
+  const context = useContext(ThemeContext);
+  if (!context) {
+    throw new Error('useTheme must be used within ThemeProvider');
+  }
+  return context;
+}

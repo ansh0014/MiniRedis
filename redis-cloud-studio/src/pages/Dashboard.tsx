@@ -160,14 +160,7 @@ export default function Dashboard() {
                 onChange={(e) => setNewInstanceName(e.target.value)}
                 disabled={creatingInstance}
               />
-              <Input
-                type="number"
-                placeholder="Port"
-                value={newInstancePort}
-                onChange={(e) => setNewInstancePort(Number(e.target.value))}
-                disabled={creatingInstance}
-                className="w-32"
-              />
+            
               <Button 
                 onClick={handleCreateInstance}
                 disabled={creatingInstance || !newInstanceName.trim()}

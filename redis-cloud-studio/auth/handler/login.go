@@ -64,12 +64,12 @@ func GoogleLoginHandler(w http.ResponseWriter, r *http.Request) {
 	if config.DB != nil {
 		var userID int64
 		err = config.DB.QueryRowContext(ctx,
-			`INSERT INTO users (firebase_uid, email, name, picture_url, email_verified, created_at, last_login)
+			`INSERT INTO users (firebase_uid, email, display_name, photo_url, email_verified, created_at, last_login)
          VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
          ON CONFLICT (firebase_uid) 
          DO UPDATE SET 
-            name = EXCLUDED.name,
-            picture_url = EXCLUDED.picture_url,
+            display_name = EXCLUDED.display_name,
+            photo_url = EXCLUDED.photo_url,
             email_verified = EXCLUDED.email_verified,
             last_login = NOW()
          RETURNING id`,

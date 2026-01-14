@@ -1,110 +1,69 @@
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Database, LogOut, Settings, User as UserIcon } from "lucide-react";
-import { ThemeToggle } from "./ThemeToggle";
-import { api, type User } from "@/lib/api";
+import { Database, LogOut } from "lucide-react";
+import ThemeToggle from "./ThemeToggle";
 import { toast } from "sonner";
 
-interface NavbarProps {
-  user: User | null;
-}
-
-export default function Navbar({ user }: NavbarProps) {
+export default function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const isLanding = location.pathname === "/";
-
-  const handleLogout = async () => {
-    try {
-      await api.logout();
-      toast.success("Logged out successfully");
-      navigate("/login");
-    } catch (error) {
-      console.error("Logout error:", error);
-      navigate("/login");
-    }
+  
+  const handleLogout = () => {
+    localStorage.removeItem("user");
+    toast.success("Logged out successfully");
+    navigate("/login");
   };
 
-  return (
-    <nav className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/80 backdrop-blur-xl">
-      <div className="container mx-auto flex h-16 items-center justify-between px-4">
-        <Link to="/" className="flex items-center gap-2 transition-opacity hover:opacity-80">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg gradient-bg">
-            <Database className="h-4 w-4 text-primary-foreground" />
-          </div>
-          <span className="text-xl font-semibold">MiniRedis</span>
-        </Link>
+  const navLinks = [
+    { path: "/dashboard", label: "Dashboard" },
+    { path: "/monitoring", label: "Monitoring" },
+  
+  ];
 
-        <div className="flex items-center gap-4">
-          <ThemeToggle />
-          {user ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative h-10 w-10 rounded-full">
-                  <Avatar>
-                    <AvatarImage src={user.picture} alt={user.name || user.email} />
-                    <AvatarFallback>
-                      {user.email.charAt(0).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>
-                  <div className="flex flex-col space-y-1">
-                    <p className="text-sm font-medium">{user.name || "User"}</p>
-                    <p className="text-xs text-muted-foreground">{user.email}</p>
-                  </div>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => navigate("/dashboard")}>
-                  <UserIcon className="mr-2 h-4 w-4" />
-                  Dashboard
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate("/settings")}>
-                  <Settings className="mr-2 h-4 w-4" />
-                  Settings
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout}>
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Log out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : (
-            <>
-              {isLanding && (
-                <div className="hidden md:flex items-center gap-6">
-                  <a href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-                    Features
-                  </a>
-                  <a href="#pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-                    Pricing
-                  </a>
-                </div>
-              )}
-              <Link to="/login">
-                <Button>Sign In</Button>
+  return (
+    <nav className="glass-card border-0 border-b sticky top-0 z-50">
+      <div className="container mx-auto px-4 sm:px-6 py-4">
+        <div className="flex items-center justify-between">
+          <Link to="/dashboard" className="flex items-center gap-2">
+            <div className="p-2 rounded-xl bg-primary/20">
+              <Database className="w-6 h-6 text-primary" />
+            </div>
+            <span className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+              MiniRedis
+            </span>
+          </Link>
+
+          <div className="hidden md:flex items-center gap-6">
+            {navLinks.map((link) => (
+              <Link
+                key={link.path}
+                to={link.path}
+                className={`text-sm font-medium transition-colors ${
+                  location.pathname === link.path
+                    ? "text-primary"
+                    : "text-foreground/70 hover:text-primary"
+                }`}
+              >
+                {link.label}
               </Link>
-              <Link to="/login">
-                <Button variant="gradient" size="sm">
-                  Start Free
-                </Button>
-              </Link>
-            </>
-          )}
+            ))}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <ThemeToggle />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleLogout}
+              className="gap-2"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="hidden sm:inline">Logout</span>
+            </Button>
+          </div>
         </div>
       </div>
     </nav>
   );
 }
+

@@ -170,3 +170,5 @@ Thumbs.db
 *.log
 !redis-cloud-studio/auth/go.mod
 !redis-cloud-studio/auth/go.sum
+venv/
+__pycache__/
