@@ -11,9 +11,23 @@ import (
 	"os"
 	"strings"
 	"time"
-	
 
 	"github.com/gorilla/mux"
+)
+
+
+func getEnv(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+var (
+	authServiceURL       = getEnv("AUTH_URL", "http://auth-service:8000")
+	backendServiceURL    = getEnv("BACKEND_URL", "http://backend:5500")
+	nodeManagerURL       = getEnv("NODE_MANAGER_URL", "http://node-manager:7000")
+	monitoringServiceURL = getEnv("MONITORING_URL", "http://monitoring-service:9000")
 )
 
 func newProxy(target string) *httputil.ReverseProxy {
@@ -38,7 +52,7 @@ func newProxy(target string) *httputil.ReverseProxy {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin == "http://localhost:5173" {
+		if origin == "http://localhost:5173" || origin == "http://localhost:80" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -79,7 +93,8 @@ func checkAuth(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 
-	authReq, err := http.NewRequest("GET", "http://localhost:8000/auth/me", nil)
+
+	authReq, err := http.NewRequest("GET", authServiceURL+"/auth/me", nil)
 	if err != nil {
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return false
@@ -96,7 +111,8 @@ func checkAuth(w http.ResponseWriter, r *http.Request) bool {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 401 {
-		refreshReq, err := http.NewRequest("POST", "http://localhost:8000/auth/refresh", nil)
+
+		refreshReq, err := http.NewRequest("POST", authServiceURL+"/auth/refresh", nil)
 		if err != nil {
 			http.Error(w, `{"error":"session expired"}`, http.StatusUnauthorized)
 			return false
@@ -141,7 +157,8 @@ func getUserId(r *http.Request) (string, error) {
 		return "", http.ErrNoCookie
 	}
 
-	authReq, _ := http.NewRequest("GET", "http://localhost:8000/auth/me", nil)
+	// ✅ Use authServiceURL
+	authReq, _ := http.NewRequest("GET", authServiceURL+"/auth/me", nil)
 	authReq.Header.Set("Cookie", "session_token="+sessionToken)
 
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -171,9 +188,17 @@ func getUserId(r *http.Request) (string, error) {
 func main() {
 	log.SetOutput(io.Discard)
 
-	authProxy := newProxy("http://localhost:8000")
-	backendProxy := newProxy("http://localhost:5500")
-	nodeProxy := newProxy("http://localhost:7000")
+	// ✅ Use service URLs from environment
+	authProxy := newProxy(authServiceURL)
+	backendProxy := newProxy(backendServiceURL)
+	nodeProxy := newProxy(nodeManagerURL)
+
+	log.SetOutput(os.Stdout)
+	log.Printf("Auth Service: %s", authServiceURL)
+	log.Printf("Backend Service: %s", backendServiceURL)
+	log.Printf("Node Manager: %s", nodeManagerURL)
+	log.Printf("Monitoring Service: %s", monitoringServiceURL)
+	log.SetOutput(io.Discard)
 
 	r := mux.NewRouter()
 

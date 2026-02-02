@@ -17,17 +17,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const root = document.documentElement;
-    
-    // Remove both classes first
+
     root.classList.remove('theme-dark', 'theme-light');
     
-    // Add the current theme class
+
     root.classList.add(`theme-${theme}`);
-    
-    // Store in localStorage
+  
     localStorage.setItem('theme', theme);
     
-    // Force repaint
+
     void root.offsetHeight;
   }, [theme]);
 

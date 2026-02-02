@@ -14,27 +14,31 @@ int main() {
     std::cout << "========================================\n\n";
 
     try {
-        std::cout << "[NodeManager] Loading environment...\n";
-        if (!EnvLoader::load("../../../.env")) {
-            std::cerr << "[ERROR] Failed to load .env file\n";
+ 
+        std::cout << "[NodeManager] Loading configuration from environment variables\n";
+        
+        // Verify critical env vars are set
+        std::string dbHost = EnvLoader::get("DB_HOST", "");
+        if (dbHost.empty()) {
+            std::cerr << "[ERROR] DB_HOST not set in environment!\n";
             return 1;
         }
-        std::cout << "[NodeManager] ✓ Environment loaded\n\n";
+        
+        std::cout << "[NodeManager]  Configuration loaded\n";
+        std::cout << "[NodeManager] DB Host: " << dbHost << "\n\n";
 
         nodeManager = new NodeManager();
 
-        // Endpoint: Start node (called by Backend)
         app().registerHandler(
             "/node/start",
             [](const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback) {
                 auto json = req->getJsonObject();
-                
-                // Log received data
+         
                 std::cout << "[NodeManager] Received start request:" << std::endl;
                 std::cout << "  Raw JSON: " << json->toStyledString() << std::endl;
                 
                 if (!json->isMember("tenant_id") || !json->isMember("port")) {
-                    std::cout << "[NodeManager] ❌ Missing required fields!" << std::endl;
+                    std::cout << "[NodeManager]  Missing required fields!" << std::endl;
                     Json::Value error;
                     error["error"] = "Missing tenant_id or port";
                     auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -70,7 +74,7 @@ int main() {
             {Post}
         );
 
-        // Endpoint: Execute command (called by Router)
+    
         app().registerHandler(
             "/node/execute",
             [](const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback) {
@@ -115,7 +119,7 @@ int main() {
             {Post}
         );
 
-        // Endpoint: List nodes - UPDATED TO RETURN FULL INFO
+
         app().registerHandler(
             "/node/list",
             [](const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback) {
@@ -155,7 +159,7 @@ int main() {
         app().addListener("0.0.0.0", port);
         app().setThreadNum(4);
         
-        std::cout << "[NodeManager] HTTP API listening on http://0.0.0.0:" << port << "\n\n";
+        std::cout << "[NodeManager]  HTTP API listening on http://0.0.0.0:" << port << "\n\n";
         std::cout << "API Endpoints:\n";
         std::cout << "  POST /node/start   - Create tenant node\n";
         std::cout << "  POST /node/execute - Execute Redis command\n";

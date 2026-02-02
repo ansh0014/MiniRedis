@@ -1,0 +1,64 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install all dependencies
+RUN apt-get update && apt-get install -y \
+    g++ \
+    cmake \
+    make \
+    git \
+    libpq-dev \
+    libssl-dev \
+    libjsoncpp-dev \
+    libhiredis-dev \
+    libbrotli-dev \
+    zlib1g-dev \
+    libc-ares-dev \
+    uuid-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install hiredis from source (for CMake config files)
+RUN git clone https://github.com/redis/hiredis.git /tmp/hiredis && \
+    cd /tmp/hiredis && \
+    mkdir build && cd build && \
+    cmake -DCMAKE_BUILD_TYPE=Release \
+          -DENABLE_SSL=ON \
+          -DCMAKE_INSTALL_PREFIX=/usr/local \
+          .. && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig && \
+    cd / && rm -rf /tmp/hiredis
+
+# Install redis-plus-plus (depends on hiredis)
+RUN git clone https://github.com/sewenew/redis-plus-plus.git /tmp/redis-plus-plus && \
+    cd /tmp/redis-plus-plus && \
+    mkdir build && cd build && \
+    cmake -DCMAKE_BUILD_TYPE=Release \
+          -DREDIS_PLUS_PLUS_CXX_STANDARD=17 \
+          -DREDIS_PLUS_PLUS_BUILD_TEST=OFF \
+          -DCMAKE_PREFIX_PATH=/usr/local \
+          .. && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig && \
+    cd / && rm -rf /tmp/redis-plus-plus
+
+# Install Drogon framework
+RUN git clone https://github.com/drogonframework/drogon.git /tmp/drogon && \
+    cd /tmp/drogon && \
+    git checkout v1.9.1 && \
+    git submodule update --init && \
+    mkdir build && cd build && \
+    cmake -DCMAKE_BUILD_TYPE=Release .. && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig && \
+    cd / && rm -rf /tmp/drogon
+
+# Set working directory
+WORKDIR /app
+
+# ✅ STOP HERE - This is just the base image!

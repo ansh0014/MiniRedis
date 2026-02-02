@@ -12,30 +12,25 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# =======================
-# CONFIG
-# =======================
+
 
 NODE_MANAGER_URL = os.getenv("NODE_MANAGER_URL", "http://localhost:7000")
 REDIS_URL = os.getenv("REDIS_URL")
 
 POLL_INTERVAL = int(os.getenv("METRICS_POLL_INTERVAL", "1"))
-MEMORY_LIMIT_BYTES = 40 * 1024 * 1024  # 40 MB
+MEMORY_LIMIT_BYTES = 40 * 1024 * 1024  
 
 redis_client: redis.Redis | None = None
 http_client: httpx.AsyncClient | None = None
 collector_task: asyncio.Task | None = None
 
 
-# =======================
-# FASTAPI LIFESPAN
-# =======================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global redis_client, http_client, collector_task
 
-    # ✅ Async Redis Cloud connection (TLS via rediss://)
+   
     redis_client = redis.from_url(
         REDIS_URL,
         decode_responses=True
@@ -64,9 +59,7 @@ async def lifespan(app: FastAPI):
         await redis_client.close()
 
 
-# =======================
-# APP INIT
-# =======================
+
 
 app = FastAPI(
     title="MiniRedis Monitoring Service (Redis-backed)",
@@ -82,9 +75,6 @@ app.add_middleware(
 )
 
 
-# =======================
-# NODE MANAGER FETCH
-# =======================
 
 async def fetch_node_manager_data() -> Dict[str, Dict]:
     try:
@@ -108,9 +98,6 @@ async def fetch_node_manager_data() -> Dict[str, Dict]:
         return {}
 
 
-# =======================
-# METRICS COLLECTOR
-# =======================
 
 async def metrics_collector():
     try:
@@ -141,7 +128,7 @@ async def metrics_collector():
                     }
                 )
 
-                # ✅ TTL safety
+        
                 await redis_client.expire(f"monitor:node:{tenant_id}", 60)
                 await redis_client.sadd("monitor:nodes", tenant_id)
 
@@ -150,10 +137,6 @@ async def metrics_collector():
     except asyncio.CancelledError:
         print("[COLLECTOR] stopped")
 
-
-# =======================
-# API HELPERS
-# =======================
 
 async def get_all_metrics() -> List[Dict]:
     tenant_ids = await redis_client.smembers("monitor:nodes")
@@ -186,9 +169,7 @@ async def get_node_info(tenant_id: str) -> Dict | None:
     return data
 
 
-# =======================
-# API ROUTES
-# =======================
+
 
 @app.get("/monitoring/nodes")
 async def monitoring_nodes():
@@ -206,3 +187,4 @@ async def monitoring_redis(tenant_id: str):
 @app.get("/health")
 async def health():
     return {"status": "ok", "backend": "redis"}
+

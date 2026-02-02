@@ -8,7 +8,6 @@ import (
 	"github.com/gorilla/mux"
 )
 
-const MONITORING_SERVICE_URL = "http://localhost:9000" // Changed from 7000 to 9000
 
 type NodeMonitoring struct {
 	TenantID           string  `json:"tenant_id"`
@@ -36,10 +35,10 @@ type RedisInfo struct {
 	TotalKeys        int     `json:"total_keys"`
 }
 
-// Get all nodes monitoring data
+
 func getAllNodesHandler(w http.ResponseWriter, r *http.Request) {
-	// Forward request to node manager
-	resp, err := http.Get(MONITORING_SERVICE_URL + "/monitoring/nodes")
+
+	resp, err := http.Get(monitoringServiceURL + "/monitoring/nodes")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to connect to monitoring service: %v", err), http.StatusServiceUnavailable)
 		return
@@ -57,13 +56,12 @@ func getAllNodesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(body)
 }
 
-// Get detailed Redis info for a specific tenant
+
 func getRedisInfoHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	tenantID := vars["tenant_id"]
 
-	// Forward request to node manager
-	resp, err := http.Get(fmt.Sprintf("%s/monitoring/redis/%s", MONITORING_SERVICE_URL, tenantID))
+	resp, err := http.Get(fmt.Sprintf("%s/monitoring/redis/%s", monitoringServiceURL, tenantID))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to connect to monitoring service: %v", err), http.StatusServiceUnavailable)
 		return
@@ -81,7 +79,7 @@ func getRedisInfoHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(body)
 }
 
-// Register monitoring routes
+
 func registerMonitoringRoutes(r *mux.Router) {
 	r.HandleFunc("/api/monitoring/nodes", getAllNodesHandler).Methods("GET", "OPTIONS")
 	r.HandleFunc("/api/monitoring/redis/{tenant_id}", getRedisInfoHandler).Methods("GET", "OPTIONS")

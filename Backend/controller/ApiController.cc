@@ -1,5 +1,6 @@
 #include "ApiController.h"
 #include "../config/config.h"
+
 #include <drogon/drogon.h>
 #include <drogon/orm/Exception.h>
 #include <sw/redis++/redis++.h>
@@ -50,19 +51,27 @@ string ApiController::generateUuid()
 ApiController::ApiController()
 {
     db_ = drogon::app().getDbClient("default");
-    
-    string redisHost = EnvLoader::get("REDIS_HOST", "localhost");
-    int redisPort = EnvLoader::getInt("REDIS_PORT", 6379);
+
+    string redisUrl = EnvLoader::get("REDIS_URL", "");
     
     try {
-        ConnectionOptions opts;
-        opts.host = redisHost;
-        opts.port = redisPort;
-        opts.socket_timeout = chrono::milliseconds(100);
-        redis_ = make_unique<Redis>(opts);
-        LOG_INFO << "Redis connected: " << redisHost << ":" << redisPort;
+        if (!redisUrl.empty()) {
+            
+            redis_ = make_unique<Redis>(redisUrl);
+            LOG_INFO << " Redis Cloud connected successfully!";
+        } else {
+            string redisHost = EnvLoader::get("REDIS_HOST", "localhost");
+            int redisPort = EnvLoader::getInt("REDIS_PORT", 6379);
+            
+            ConnectionOptions opts;
+            opts.host = redisHost;
+            opts.port = redisPort;
+            opts.socket_timeout = chrono::milliseconds(100);
+            redis_ = make_unique<Redis>(opts);
+            LOG_INFO << "Redis connected: " << redisHost << ":" << redisPort;
+        }
     } catch (const exception &ex) {
-        LOG_ERROR << "Redis init failed: " << ex.what();
+        LOG_ERROR << " Redis init failed: " << ex.what();
         redis_.reset();
     }
 }
@@ -133,7 +142,7 @@ void ApiController::createTenant(const HttpRequestPtr& req, function<void(const 
             
             cout << "[Backend] Starting node via Node Manager..." << endl;
             
-            auto nodeClient = HttpClient::newHttpClient("http://localhost:7000");
+            auto nodeClient = HttpClient::newHttpClient("http://node-manager:7000");
             Json::Value nodeJson;
             nodeJson["tenant_id"] = tenantId;
             nodeJson["port"] = nodePort;
@@ -499,7 +508,9 @@ void ApiController::checkRateLimit(const HttpRequestPtr &req,
 
                     Json::Value out;
                     out["allowed"] = allowed;
-                    out["current_count"] = (long long)count;
+           
+                    out["current_count"] = (int)count;
+             
                     out["max_allowed"] = maxPerSecond;
                     out["remaining"] = max(0, maxPerSecond - (int)count);
 

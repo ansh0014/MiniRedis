@@ -1,107 +1,233 @@
+version: '3.8'
+
 services:
-  postgres:
+  # ==============================================
+  # BASE IMAGE BUILDER
+  # ==============================================
+  
+  drogon-base:
+    build:
+      context: .
+      dockerfile: Dockerfile.base
+    image: drogon-base:latest
+    container_name: drogon-base-builder
+    command: ["echo", "Drogon base image built successfully"]
+
+  # ==============================================
+  # DATABASES
+  # ==============================================
+  
+  postgres-main:
     image: postgres:15-alpine
-    container_name: miniredis-postgres
+    container_name: postgres-main
     environment:
-      POSTGRES_DB: ${DB_NAME:-miniredis}
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_DB: ${POSTGRES_MAIN_DB}
+      POSTGRES_USER: ${POSTGRES_MAIN_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_MAIN_PASSWORD}
     ports:
-      - "5002:5432"
+      - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./Backend/db/db.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - postgres-main-data:/var/lib/postgresql/data
+   
+      - ./Backend/db/db.sql:/docker-entrypoint-initdb.d/01-db.sql:ro
+      - ./Backend/db/migrations/001_add_firebase_uid.sql:/docker-entrypoint-initdb.d/02-migration-001.sql:ro
+      - ./Backend/db/migrations/002_create_rate_limits.sql:/docker-entrypoint-initdb.d/03-migration-002.sql:ro
     networks:
       - miniredis-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d miniredis"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_MAIN_USER} -d ${POSTGRES_MAIN_DB}"]
+      interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
+  postgres-auth:
+    image: postgres:15-alpine
+    container_name: postgres-auth
+    environment:
+      POSTGRES_DB: ${POSTGRES_AUTH_DB}
+      POSTGRES_USER: ${POSTGRES_AUTH_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_AUTH_PASSWORD}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-auth-data:/var/lib/postgresql/data
+
+      - ./redis-cloud-studio/auth/migrations/miniredis_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    networks:
+      - miniredis-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_AUTH_USER} -d ${POSTGRES_AUTH_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ==============================================
+  # BACKEND SERVICES
+  # ==============================================
+
   backend:
     build:
-      context: ./Backend    # ← Sets Backend/ as the build root
-      dockerfile: Dockerfile
-    container_name: miniredis-backend
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: ${DB_NAME:-miniredis}
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD}
-      SERVER_PORT: ${BACKEND_PORT:-5500}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      context: .
+      dockerfile: Backend/Dockerfile
+    image: miniredis-backend:latest
+    container_name: backend
     ports:
-      - "${BACKEND_PORT:-5500}:5500"
+      - "${BACKEND_PORT}:5500"
+    environment:
+      - DB_HOST=${POSTGRES_MAIN_HOST}
+      - DB_PORT=${POSTGRES_MAIN_PORT}
+      - DB_NAME=${POSTGRES_MAIN_DB}
+      - DB_USER=${POSTGRES_MAIN_USER}
+      - DB_PASSWORD=${POSTGRES_MAIN_PASSWORD}
+      - REDIS_CLOUD_URL=${REDIS_CLOUD_URL}
+      - LOG_LEVEL=${LOG_LEVEL}
+    networks:
+      - miniredis-network
     depends_on:
-      postgres:
+      drogon-base:
+        condition: service_completed_successfully
+      postgres-main:
         condition: service_healthy
-    networks:
-      - miniredis-network
     restart: unless-stopped
 
-  redis-node1:
+  node-manager:
     build:
       context: .
       dockerfile: node/Dockerfile
-    container_name: miniredis-node1
-    command: ["--port", "6379", "--tenant", "tenant1"]
+    image: miniredis-node-manager:latest
+    container_name: node-manager
     ports:
-      - "${NODE1_PORT:-6379}:6379"
-    networks:
-      - miniredis-network
-    restart: unless-stopped
-
-  redis-node2:
-    build:
-      context: .
-      dockerfile: node/Dockerfile
-    container_name: miniredis-node2
-    command: ["--port", "6380", "--tenant", "tenant2"]
-    ports:
-      - "${NODE2_PORT:-6380}:6380"
-    networks:
-      - miniredis-network
-    restart: unless-stopped
-
-  redis-node3:
-    build:
-      context: .
-      dockerfile: node/Dockerfile
-    container_name: miniredis-node3
-    command: ["--port", "6381", "--tenant", "tenant3"]
-    ports:
-      - "${NODE3_PORT:-6381}:6381"
-    networks:
-      - miniredis-network
-    restart: unless-stopped
-
-  router:
-    build:
-      context: .
-      dockerfile: router/Dockerfile
-    container_name: miniredis-router
+      - "${NODE_MANAGER_PORT}:7000"
+      - "6001-6999:6001-6999"  # Full port range for dynamic Redis nodes
     environment:
-      ROUTER_PORT: ${ROUTER_PORT:-6300}
-      BACKEND_HOST: backend
-      BACKEND_PORT: 5500
+      - DB_HOST=${POSTGRES_MAIN_HOST}
+      - DB_PORT=${POSTGRES_MAIN_PORT}
+      - DB_NAME=${POSTGRES_MAIN_DB}
+      - DB_USER=${POSTGRES_MAIN_USER}
+      - DB_PASSWORD=${POSTGRES_MAIN_PASSWORD}
+      - REDIS_PORT_START=${REDIS_PORT_START}
+      - REDIS_PORT_END=${REDIS_PORT_END}
+      - REDIS_MAX_MEMORY=${REDIS_MAX_MEMORY}
+      - REDIS_EVICTION_POLICY=${REDIS_EVICTION_POLICY}
+      - REDIS_PROTECTED_MODE=${REDIS_PROTECTED_MODE}
+      - LOG_LEVEL=${LOG_LEVEL}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # For dynamic container creation
+      - redis-nodes-data:/data
+    networks:
+      - miniredis-network
+    privileged: true  # Needed to spawn Redis containers
+    depends_on:
+      drogon-base:
+        condition: service_completed_successfully
+      postgres-main:
+        condition: service_healthy
+    restart: unless-stopped
+
+  auth-service:
+    build:
+      context: redis-cloud-studio/auth
+      dockerfile: Dockerfile
+    image: miniredis-auth:latest
+    container_name: auth-service
     ports:
-      - "${ROUTER_PORT:-6300}:6300"
+      - "${AUTH_SERVICE_PORT}:8000"
+    environment:
+      - DB_HOST=${POSTGRES_AUTH_HOST}
+      - DB_PORT=${POSTGRES_AUTH_PORT}
+      - DB_NAME=${POSTGRES_AUTH_DB}
+      - DB_USER=${POSTGRES_AUTH_USER}
+      - DB_PASSWORD=${POSTGRES_AUTH_PASSWORD}
+      - FIREBASE_API_KEY=${FIREBASE_API_KEY}
+      - BACKEND_URL=${BACKEND_URL}
+      - LOG_LEVEL=${LOG_LEVEL}
+    volumes:
+      - ./redis-cloud-studio/auth/firebase-service-account.json:/app/firebase-service-account.json:ro
+    networks:
+      - miniredis-network
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+    restart: unless-stopped
+
+  monitoring-service:
+    build:
+      context: monitoring-service
+      dockerfile: Dockerfile
+    image: miniredis-monitoring:latest
+    container_name: monitoring-service
+    ports:
+      - "${MONITORING_SERVICE_PORT}:9000"
+    environment:
+      - DB_HOST=${POSTGRES_MAIN_HOST}
+      - DB_PORT=${POSTGRES_MAIN_PORT}
+      - DB_NAME=${POSTGRES_MAIN_DB}
+      - DB_USER=${POSTGRES_MAIN_USER}
+      - DB_PASSWORD=${POSTGRES_MAIN_PASSWORD}
+      - NODE_MANAGER_URL=${NODE_MANAGER_URL}
+      - REDIS_URL=${REDIS_URL}  
+      - METRICS_POLL_INTERVAL=${METRICS_POLL_INTERVAL}
+      - LOG_LEVEL=${LOG_LEVEL}
+    networks:
+      - miniredis-network
+    depends_on:
+      postgres-main:
+        condition: service_healthy
+      node-manager:
+        condition: service_started
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: api-gateway
+      dockerfile: Dockerfile
+    image: miniredis-gateway:latest
+    container_name: api-gateway
+    ports:
+      - "${GATEWAY_PORT}:8080"
+    environment:
+      - BACKEND_URL=${BACKEND_URL}
+      - AUTH_URL=${AUTH_URL}
+      - NODE_MANAGER_URL=${NODE_MANAGER_URL}
+      - MONITORING_URL=${MONITORING_URL}
+      - LOG_LEVEL=${LOG_LEVEL}
+    networks:
+      - miniredis-network
     depends_on:
       - backend
-      - redis-node1
-      - redis-node2
-      - redis-node3
+      - auth-service
+      - node-manager
+      - monitoring-service
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: redis-cloud-studio
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=http://localhost:${GATEWAY_PORT}
+        - VITE_FIREBASE_API_KEY=${FIREBASE_API_KEY}
+        - VITE_FIREBASE_AUTH_DOMAIN=${FIREBASE_AUTH_DOMAIN}
+        - VITE_FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
+        - VITE_FIREBASE_STORAGE_BUCKET=${FIREBASE_STORAGE_BUCKET}
+        - VITE_FIREBASE_MESSAGING_SENDER_ID=${FIREBASE_MESSAGING_SENDER_ID}
+        - VITE_FIREBASE_APP_ID=${FIREBASE_APP_ID}
+    image: miniredis-frontend:latest
+    container_name: frontend
+    ports:
+      - "5173:5173"
     networks:
       - miniredis-network
+    depends_on:
+      - api-gateway
     restart: unless-stopped
 
 volumes:
-  postgres_data:
-    driver: local
+  postgres-main-data:
+  postgres-auth-data:
+  redis-nodes-data:  # Shared volume for all Redis nodes
 
 networks:
   miniredis-network:

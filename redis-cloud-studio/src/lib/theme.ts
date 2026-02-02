@@ -13,8 +13,8 @@ export const themes = {
       muted: '#6b7280',
     },
     accent: {
-      primary: '#d4a373', // muted gold
-      secondary: '#ff8c42', // soft orange
+      primary: '#d4a373', 
+      secondary: '#ff8c42',
       glow: 'rgba(212, 163, 115, 0.15)',
     },
     border: 'rgba(255, 255, 255, 0.08)',

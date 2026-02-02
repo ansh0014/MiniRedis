@@ -60,12 +60,12 @@ const ApiKeyCard = ({ apiKey }: ApiKeyCardProps) => {
           >
             {isVisible ? (
               <>
-                <EyeOff className="h-4 w-4" />
+                <EyeOff className="h-4 w-4 mr-2" />
                 Hide
               </>
             ) : (
               <>
-                <Eye className="h-4 w-4" />
+                <Eye className="h-4 w-4 mr-2" />
                 Show
               </>
             )}
@@ -77,12 +77,12 @@ const ApiKeyCard = ({ apiKey }: ApiKeyCardProps) => {
           >
             {copied ? (
               <>
-                <Check className="h-4 w-4 text-success" />
+                <Check className="h-4 w-4 text-green-500 mr-2" />
                 Copied
               </>
             ) : (
               <>
-                <Copy className="h-4 w-4" />
+                <Copy className="h-4 w-4 mr-2" />
                 Copy
               </>
             )}
@@ -91,10 +91,10 @@ const ApiKeyCard = ({ apiKey }: ApiKeyCardProps) => {
             variant="outline"
             size="sm"
             onClick={handleRegenerate}
-            loading={regenerating}
+            disabled={regenerating}
           >
-            <RefreshCw className="h-4 w-4" />
-            Regenerate
+            <RefreshCw className={`h-4 w-4 mr-2 ${regenerating ? 'animate-spin' : ''}`} />
+            {regenerating ? 'Regenerating...' : 'Regenerate'}
           </Button>
         </div>
       </div>
