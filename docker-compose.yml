@@ -2,6 +2,34 @@ version: '3.8'
 
 services:
   # ==============================================
+  # REDIS MASTER - Central Key-Value Store
+  # ==============================================
+  
+  redis-master:
+    image: redis:7-alpine
+    container_name: redis-master
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --protected-mode no
+      --bind 0.0.0.0
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-master-data:/data
+    networks:
+      - miniredis-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ==============================================
   # BASE IMAGE BUILDER
   # ==============================================
   
@@ -28,8 +56,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres-main-data:/var/lib/postgresql/data
-   
-      - ./Backend/db/db.sql:/docker-entrypoint-initdb.d/01-db.sql:ro
+      - ./Backend/db/db.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       - ./Backend/db/migrations/001_add_firebase_uid.sql:/docker-entrypoint-initdb.d/02-migration-001.sql:ro
       - ./Backend/db/migrations/002_create_rate_limits.sql:/docker-entrypoint-initdb.d/03-migration-002.sql:ro
     networks:
@@ -52,7 +79,6 @@ services:
       - "5433:5432"
     volumes:
       - postgres-auth-data:/var/lib/postgresql/data
-
       - ./redis-cloud-studio/auth/migrations/miniredis_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     networks:
       - miniredis-network
@@ -81,7 +107,10 @@ services:
       - DB_NAME=${POSTGRES_MAIN_DB}
       - DB_USER=${POSTGRES_MAIN_USER}
       - DB_PASSWORD=${POSTGRES_MAIN_PASSWORD}
-      - REDIS_CLOUD_URL=${REDIS_CLOUD_URL}
+      
+      - REDIS_HOST=redis-master
+      - REDIS_PORT=6379
+      - NODE_MANAGER_URL=http://node-manager:7000
       - LOG_LEVEL=${LOG_LEVEL}
     networks:
       - miniredis-network
@@ -89,6 +118,8 @@ services:
       drogon-base:
         condition: service_completed_successfully
       postgres-main:
+        condition: service_healthy
+      redis-master:
         condition: service_healthy
     restart: unless-stopped
 
@@ -100,7 +131,6 @@ services:
     container_name: node-manager
     ports:
       - "${NODE_MANAGER_PORT}:7000"
-      - "6001-6999:6001-6999"  # Full port range for dynamic Redis nodes
     environment:
       - DB_HOST=${POSTGRES_MAIN_HOST}
       - DB_PORT=${POSTGRES_MAIN_PORT}
@@ -112,13 +142,13 @@ services:
       - REDIS_MAX_MEMORY=${REDIS_MAX_MEMORY}
       - REDIS_EVICTION_POLICY=${REDIS_EVICTION_POLICY}
       - REDIS_PROTECTED_MODE=${REDIS_PROTECTED_MODE}
+      - NODE_MANAGER_PORT=${NODE_MANAGER_PORT}
       - LOG_LEVEL=${LOG_LEVEL}
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  # For dynamic container creation
-      - redis-nodes-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - miniredis-network
-    privileged: true  # Needed to spawn Redis containers
+    privileged: true
     depends_on:
       drogon-base:
         condition: service_completed_successfully
@@ -142,6 +172,7 @@ services:
       - DB_PASSWORD=${POSTGRES_AUTH_PASSWORD}
       - FIREBASE_API_KEY=${FIREBASE_API_KEY}
       - BACKEND_URL=${BACKEND_URL}
+      - AUTH_SERVICE_PORT=8000
       - LOG_LEVEL=${LOG_LEVEL}
     volumes:
       - ./redis-cloud-studio/auth/firebase-service-account.json:/app/firebase-service-account.json:ro
@@ -150,6 +181,11 @@ services:
     depends_on:
       postgres-auth:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   monitoring-service:
@@ -167,13 +203,17 @@ services:
       - DB_USER=${POSTGRES_MAIN_USER}
       - DB_PASSWORD=${POSTGRES_MAIN_PASSWORD}
       - NODE_MANAGER_URL=${NODE_MANAGER_URL}
-      - REDIS_URL=${REDIS_URL}  
+      
+      - REDIS_HOST=redis-master
+      - REDIS_PORT=6379
       - METRICS_POLL_INTERVAL=${METRICS_POLL_INTERVAL}
       - LOG_LEVEL=${LOG_LEVEL}
     networks:
       - miniredis-network
     depends_on:
       postgres-main:
+        condition: service_healthy
+      redis-master:
         condition: service_healthy
       node-manager:
         condition: service_started
@@ -188,18 +228,28 @@ services:
     ports:
       - "${GATEWAY_PORT}:8080"
     environment:
-      - BACKEND_URL=${BACKEND_URL}
-      - AUTH_URL=${AUTH_URL}
-      - NODE_MANAGER_URL=${NODE_MANAGER_URL}
-      - MONITORING_URL=${MONITORING_URL}
+      - BACKEND_URL=http://backend:5500
+      - AUTH_URL=http://auth-service:8000
+      - NODE_MANAGER_URL=http://node-manager:7000
+      - MONITORING_URL=http://monitoring-service:9000
+      - GATEWAY_PORT=8080
       - LOG_LEVEL=${LOG_LEVEL}
     networks:
       - miniredis-network
     depends_on:
-      - backend
-      - auth-service
-      - node-manager
-      - monitoring-service
+      backend:
+        condition: service_started
+      auth-service:
+        condition: service_healthy
+      node-manager:
+        condition: service_started
+      monitoring-service:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   frontend:
@@ -227,7 +277,7 @@ services:
 volumes:
   postgres-main-data:
   postgres-auth-data:
-  redis-nodes-data:  # Shared volume for all Redis nodes
+  redis-master-data:  
 
 networks:
   miniredis-network:

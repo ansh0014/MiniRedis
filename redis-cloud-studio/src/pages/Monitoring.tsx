@@ -38,27 +38,33 @@ export default function Monitoring() {
       if (response.ok) {
         const data = await response.json();
         
+       
         if (Array.isArray(data)) {
-          // Only show nodes with status "running" - strict check
-          const runningNodes = data.filter(
+       
+          const sanitizedNodes = data.map((node: any) => ({
+            ...node,
+            key_count: Number(node.key_count) || 0,
+            memory_used_bytes: Number(node.memory_used_bytes) || 0,
+            memory_used_mb: Number(node.memory_used_mb) || 0,
+            memory_limit_mb: Number(node.memory_limit_mb) || 0,
+            memory_usage_percent: Number(node.memory_usage_percent) || 0,
+            connected_clients: Number(node.connected_clients) || 0,
+            port: Number(node.port) || 0,
+          }));
+          
+          // Filter running nodes
+          const runningNodes = sanitizedNodes.filter(
             (node: NodeMonitoring) => node.status === "running"
           );
           setNodes(runningNodes);
         }
       }
     } catch (err) {
+      console.error("Failed to fetch monitoring data:", err);
       setNodes([]);
     } finally {
       setLoading(false);
     }
-  };
-
-  const formatBytes = (bytes: number): string => {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
   };
 
   if (loading) {
@@ -116,10 +122,10 @@ export default function Monitoring() {
                     <div>
                       <p className="text-sm text-foreground/60">Memory Used</p>
                       <p className="text-lg font-semibold">
-                        {node.memory_used_mb.toFixed(2)} MB
+                        {(node.memory_used_mb || 0).toFixed(2)} MB
                       </p>
                       <p className="text-xs text-foreground/50">
-                        {node.memory_usage_percent.toFixed(1)}% of {node.memory_limit_mb} MB
+                        {(node.memory_usage_percent || 0).toFixed(1)}% of {node.memory_limit_mb || 0} MB
                       </p>
                     </div>
                   </div>
@@ -131,7 +137,7 @@ export default function Monitoring() {
                     <div>
                       <p className="text-sm text-foreground/60">Total Keys</p>
                       <p className="text-lg font-semibold">
-                        {node.key_count.toLocaleString()}
+                        {(node.key_count || 0).toLocaleString()}
                       </p>
                       <p className="text-xs text-foreground/50">Stored items</p>
                     </div>
@@ -143,7 +149,7 @@ export default function Monitoring() {
                     </div>
                     <div>
                       <p className="text-sm text-foreground/60">Connected Clients</p>
-                      <p className="text-lg font-semibold">{node.connected_clients}</p>
+                      <p className="text-lg font-semibold">{node.connected_clients || 0}</p>
                       <p className="text-xs text-foreground/50">Active connections</p>
                     </div>
                   </div>
@@ -155,7 +161,7 @@ export default function Monitoring() {
                     <div>
                       <p className="text-sm text-foreground/60">Memory</p>
                       <p className="text-lg font-semibold">
-                        {node.memory_used_human}
+                        {node.memory_used_human || "0 B"}
                       </p>
                       <p className="text-xs text-foreground/50">Human readable</p>
                     </div>
@@ -165,7 +171,7 @@ export default function Monitoring() {
                 <div className="mt-4 p-3 bg-muted rounded-lg">
                   <p className="text-xs text-foreground/60 mb-1">Connect via CLI:</p>
                   <code className="text-sm font-mono text-primary">
-                    {node.redis_cli_command}
+                    {node.redis_cli_command || `redis-cli -h localhost -p ${node.port}`}
                   </code>
                 </div>
               </Card>
