@@ -131,12 +131,10 @@ int main() {
                     auto node = nodeManager->getNode(tenantId);
                     if (node) {
                         Json::Value nodeInfo;
-                        nodeInfo["tenant_id"] = tenantId;
-                        nodeInfo["port"] = node->getPort();
-                        nodeInfo["status"] = node->isRunning() ? "running" : "stopped";
-                        nodeInfo["memory_used"] = (int)node->getMemoryUsage();
-                        nodeInfo["key_count"] = (int)node->getKeyCount();
-                        
+                         nodeInfo["port"] = node->port_; 
+                        nodeInfo["status"] = node->isRunning_ ? "running" : "stopped";  
+                        nodeInfo["memory_used"] = 0;
+                        nodeInfo["key_count"] = 0;
                         // Add ISO timestamp (current time for now)
                         auto now = std::chrono::system_clock::now();
                         auto time_t_now = std::chrono::system_clock::to_time_t(now);
@@ -153,6 +151,56 @@ int main() {
                 callback(resp);
             },
             {Get}
+        );
+
+        app().registerHandler("/node/info",
+            [](const HttpRequestPtr& req,
+               std::function<void(const HttpResponsePtr&)>&& callback) {
+                
+                auto jsonPtr = req->getJsonObject();
+                if (!jsonPtr) {
+                    Json::Value error;
+                    error["error"] = "Invalid JSON";
+                    auto resp = HttpResponse::newHttpJsonResponse(error);
+                    resp->setStatusCode(k400BadRequest);
+                    callback(resp);
+                    return;
+                }
+
+                std::string tenantId = (*jsonPtr)["tenant_id"].asString();
+                
+                if (tenantId.empty()) {
+                    Json::Value error;
+                    error["error"] = "tenant_id required";
+                    auto resp = HttpResponse::newHttpJsonResponse(error);
+                    resp->setStatusCode(k400BadRequest);
+                    callback(resp);
+                    return;
+                }
+
+                auto node = nodeManager->getNode(tenantId);
+                
+                if (!node) {
+                    Json::Value error;
+                    error["error"] = "Node not found";
+                    auto resp = HttpResponse::newHttpJsonResponse(error);
+                    resp->setStatusCode(k404NotFound);
+                    callback(resp);
+                    return;
+                }
+
+                Json::Value nodeInfo;
+                nodeInfo["tenant_id"] = tenantId;
+                nodeInfo["port"] = node->port_;  // Use member variable, not getPort()
+                nodeInfo["status"] = node->isRunning_ ? "running" : "stopped";  // Use member variable
+                nodeInfo["memory_limit_mb"] = node->memoryLimitMb_;
+                nodeInfo["container_id"] = node->containerId_;
+                nodeInfo["idle_seconds"] = node->getIdleSeconds();
+
+                auto resp = HttpResponse::newHttpJsonResponse(nodeInfo);
+                callback(resp);
+            },
+            {Post}
         );
 
         int port = EnvLoader::getInt("NODE_MANAGER_PORT", 7000);
