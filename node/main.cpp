@@ -125,7 +125,7 @@ int main() {
             [](const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback) {
                 auto tenantIds = nodeManager->listNodes();
                 
-                Json::Value response(Json::arrayValue);
+                Json::Value nodesArray(Json::arrayValue);
                 
                 for (const auto& tenantId : tenantIds) {
                     auto node = nodeManager->getNode(tenantId);
@@ -134,20 +134,19 @@ int main() {
                         nodeInfo["tenant_id"] = tenantId;
                         nodeInfo["port"] = node->getPort();
                         nodeInfo["status"] = node->isRunning() ? "running" : "stopped";
-                        nodeInfo["memory_used"] = (int)node->getMemoryUsage();
-                        nodeInfo["key_count"] = (int)node->getKeyCount();
+                        nodeInfo["memory_bytes"] = (Json::UInt64)node->getMemoryUsage();
+                        nodeInfo["memory_mb"] = (double)node->getMemoryUsage() / (1024.0 * 1024.0);
+                        nodeInfo["key_count"] = (Json::UInt64)node->getKeyCount();
+                        nodeInfo["memory_limit_mb"] = 40;
                         
-                        // Add ISO timestamp (current time for now)
-                        auto now = std::chrono::system_clock::now();
-                        auto time_t_now = std::chrono::system_clock::to_time_t(now);
-                        char buffer[100];
-                        std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S.000Z", 
-                                    std::gmtime(&time_t_now));
-                        nodeInfo["created_at"] = std::string(buffer);
-                        
-                        response.append(nodeInfo);
+                        nodesArray.append(nodeInfo);
                     }
                 }
+
+                Json::Value response;
+                response["success"] = true;
+                response["nodes"] = nodesArray;
+                response["count"] = (int)nodesArray.size();
 
                 auto resp = HttpResponse::newHttpJsonResponse(response);
                 callback(resp);

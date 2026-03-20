@@ -13,7 +13,7 @@ interface RedisNode {
   tenant_id: string;
   port: number;
   status: string;
-  created_at: string;
+  created_at?: string;
 }
 
 export default function RedisCLI() {
@@ -30,7 +30,7 @@ export default function RedisCLI() {
   const loadNodes = async () => {
     try {
       const nodeList = await api.listNodes();
-      console.log('📋 Loaded nodes:', nodeList);
+      console.log(' Loaded nodes:', nodeList);
       setNodes(nodeList);
       
       if (nodeList.length > 0 && !selectedNode) {
@@ -75,7 +75,7 @@ export default function RedisCLI() {
         command.trim()
       );
 
-      console.log('✅ Command result:', result);
+      console.log(' Command result:', result);
 
       setHistory(prev => {
         const newHistory = [...prev];
@@ -88,7 +88,7 @@ export default function RedisCLI() {
 
       toast.success('Command executed');
     } catch (error: any) {
-      console.error('❌ Command failed:', error);
+      console.error(' Command failed:', error);
       
       setHistory(prev => {
         const newHistory = [...prev];

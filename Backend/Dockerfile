@@ -2,11 +2,10 @@ FROM drogon-base:latest AS builder
 
 WORKDIR /app
 
-COPY Backend/CMakeLists.txt .
+COPY Backend/CmakeLists.txt ./CMakeLists.txt
 COPY Backend/main.cc .
 COPY Backend/controller/ controller/
 COPY config/ config/
-
 
 RUN mkdir build && cd build && \
     cmake .. && \
@@ -28,9 +27,7 @@ COPY --from=builder /usr/local/include/hiredis /usr/local/include/hiredis
 RUN ldconfig
 
 WORKDIR /app
-
 COPY --from=builder /app/build/miniredis_backend .
 
 EXPOSE 5500
-
 CMD ["./miniredis_backend"]

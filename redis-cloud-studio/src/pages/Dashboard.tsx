@@ -5,9 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Terminal from "@/components/Terminal";
-import { Play, Square, Trash2, Plus, Database, Activity, Clock, Server } from "lucide-react";
+import { Play, Square, Plus, Database, Activity, Server } from "lucide-react";
 import { api, type RedisNode, type Tenant, type User } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -20,9 +19,17 @@ export default function Dashboard() {
   const [creatingInstance, setCreatingInstance] = useState(false);
   const [newInstanceName, setNewInstanceName] = useState("");
   const [newInstancePort, setNewInstancePort] = useState(6380);
+  const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
     loadUserAndData();
+  }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      loadNodes();
+    }, 2000);
+    return () => clearInterval(id);
   }, []);
 
   const loadUserAndData = async () => {
@@ -30,7 +37,7 @@ export default function Dashboard() {
       const userData = await api.me();
       setUser(userData);
       await loadNodes();
-    } catch (error) {
+    } catch {
       navigate("/login");
     } finally {
       setLoading(false);
@@ -39,10 +46,10 @@ export default function Dashboard() {
 
   const loadNodes = async () => {
     try {
-      const nodeList = await api.listNodes();
-      setNodes(nodeList);
-    } catch (error) {
-      toast.error("Failed to load instances");
+      const list = await api.listNodes();
+      setNodes(Array.isArray(list) ? list : []);
+    } catch {
+      setNodes([]);
     }
   };
 
@@ -56,11 +63,24 @@ export default function Dashboard() {
     try {
       const tenant = await api.createTenant(newInstanceName, 40);
 
-      toast.success(`Instance "${newInstanceName}" created on port ${tenant.port}!`);
+      const tenantId = String(
+        tenant?.id ?? tenant?.tenant_id ?? tenant?.tenant?.id ?? tenant?.tenant?.tenant_id ?? ""
+      );
+      const tenantPort = Number(
+        tenant?.port ??
+        tenant?.node_port ??
+        tenant?.tenant?.port ??
+        tenant?.tenant?.node_port ??
+        newInstancePort
+      );
 
+      if (tenantId && tenantPort) {
+        await api.startNode(tenantId, tenantPort);
+      }
+
+      toast.success(`Instance "${newInstanceName}" created on port ${tenantPort}!`);
       setNewInstanceName("");
-      setNewInstancePort(tenant.port + 1);
-
+      setNewInstancePort(tenantPort + 1);
       await loadNodes();
     } catch (error: any) {
       toast.error(error.message || "Failed to create instance");
@@ -91,6 +111,15 @@ export default function Dashboard() {
     }
   };
 
+  const filteredNodes = nodes.filter((n) => {
+    const q = searchTerm.toLowerCase();
+    return (
+      String(n?.tenant_id ?? "").toLowerCase().includes(q) ||
+      String((n as any)?.name ?? "").toLowerCase().includes(q) ||
+      String(n?.status ?? "").toLowerCase().includes(q)
+    );
+  });
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -101,8 +130,7 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Navbar user={user} />
-      
+      <Navbar />
       <main className="container mx-auto p-6 space-y-6">
         <div className="flex justify-between items-center">
           <div>
@@ -121,7 +149,7 @@ export default function Dashboard() {
               <div className="text-2xl font-bold">{nodes.length}</div>
             </CardContent>
           </Card>
-          
+
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Active Nodes</CardTitle>
@@ -133,7 +161,7 @@ export default function Dashboard() {
               </div>
             </CardContent>
           </Card>
-          
+
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Stopped Nodes</CardTitle>
@@ -160,11 +188,7 @@ export default function Dashboard() {
                 onChange={(e) => setNewInstanceName(e.target.value)}
                 disabled={creatingInstance}
               />
-            
-              <Button 
-                onClick={handleCreateInstance}
-                disabled={creatingInstance || !newInstanceName.trim()}
-              >
+              <Button onClick={handleCreateInstance} disabled={creatingInstance || !newInstanceName.trim()}>
                 <Plus className="mr-2 h-4 w-4" />
                 {creatingInstance ? "Creating..." : "Create"}
               </Button>
@@ -184,39 +208,28 @@ export default function Dashboard() {
               </div>
             ) : (
               <div className="space-y-4">
-                {nodes.map((node) => (
-                  <div
-                    key={node.tenant_id}
-                    className="flex items-center justify-between p-4 border rounded-lg"
-                  >
+                {filteredNodes.map((node) => (
+                  <div key={node.tenant_id} className="flex items-center justify-between p-4 border rounded-lg">
                     <div className="flex items-center gap-4">
                       <Database className="h-8 w-8 text-primary" />
                       <div>
                         <h3 className="font-semibold">{node.tenant_id}</h3>
                         <p className="text-sm text-muted-foreground">
-                          Port: {node.port} • Created: {new Date(node.created_at).toLocaleDateString()}
+                          Port: {node.port} • Created: {node.created_at ? new Date(node.created_at).toLocaleDateString() : "N/A"}
                         </p>
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-3">
                       <Badge variant={node.status === "running" ? "default" : "secondary"}>
                         {node.status}
                       </Badge>
-                      
                       {node.status === "running" ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleStopNode(node.tenant_id)}
-                        >
+                        <Button size="sm" variant="outline" onClick={() => handleStopNode(node.tenant_id)}>
                           <Square className="h-4 w-4" />
                         </Button>
                       ) : (
-                        <Button
-                          size="sm"
-                          onClick={() => handleStartNode(node.tenant_id)}
-                        >
+                        <Button size="sm" onClick={() => handleStartNode(node.tenant_id)}>
                           <Play className="h-4 w-4" />
                         </Button>
                       )}

@@ -1,6 +1,6 @@
 #include <drogon/drogon.h>
 #include <iostream>
-#include "../config/config.h"
+#include "config/config.h"
 
 int main() {
     std::cout << "MiniRedis Backend API v2.0\n";

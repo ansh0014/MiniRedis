@@ -35,10 +35,18 @@ export interface User {
 }
 
 export interface Tenant {
-  tenant_id: string;
+  tenant_id?: string;
+  id?: string;
   name: string;
-  port: number;
-  status: string;
+  port?: number;
+  node_port?: number;
+  status?: string;
+  tenant?: {
+    id?: string;
+    tenant_id?: string;
+    port?: number;
+    node_port?: number;
+  };
 }
 
 export interface ApiKey {
@@ -50,7 +58,7 @@ export interface RedisNode {
   tenant_id: string;
   status: string;
   port: number;
-  created_at: string;
+  created_at?: string;
   memory_used?: number;
   key_count?: number;
 }
@@ -67,8 +75,8 @@ export const api = {
   createTenant: (name: string, memoryMb: number = 40) =>
     gatewayFetch<Tenant>('/api/tenants', {
       method: 'POST',
-      body: JSON.stringify({ 
-        name, 
+      body: JSON.stringify({
+        name,
         memory_limit_mb: memoryMb
       }),
     }),
@@ -87,7 +95,13 @@ export const api = {
   revokeApiKey: (key: string) =>
     gatewayFetch<{ status: string }>(`/api/apikeys/${key}`, { method: 'DELETE' }),
 
-  listNodes: () => gatewayFetch<RedisNode[]>('/api/nodes/list'),
+  listNodes: async (): Promise<RedisNode[]> => {
+    const data = await gatewayFetch<any>('/api/nodes/list');
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.nodes)) return data.nodes;
+    if (Array.isArray(data?.data)) return data.data;
+    return [];
+  },
 
   startNode: (tenantId: string, port: number) =>
     gatewayFetch<{ success: boolean }>('/api/nodes/start', {
