@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: miniredis-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: backend
+          image: miniredis-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5500
+          env:
+            - name: DB_HOST
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: POSTGRES_MAIN_HOST } }
+            - name: DB_PORT
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: POSTGRES_MAIN_PORT } }
+            - name: DB_NAME
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: POSTGRES_MAIN_DB } }
+            - name: DB_USER
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: POSTGRES_MAIN_USER } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: miniredis-secrets, key: POSTGRES_MAIN_PASSWORD } }
+            - name: NODE_MANAGER_URL
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: NODE_MANAGER_URL } }
+            - name: LOG_LEVEL
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: LOG_LEVEL } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: miniredis-dev
+spec:
+  type: ClusterIP
+  selector:
+    app: backend
+  ports:
+    - port: 5500
+      targetPort: 5500

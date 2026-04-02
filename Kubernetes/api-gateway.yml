@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: miniredis-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+        - name: api-gateway
+          image: miniredis-gateway:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: BACKEND_URL
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: BACKEND_URL } }
+            - name: AUTH_URL
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: AUTH_URL } }
+            - name: NODE_MANAGER_URL
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: NODE_MANAGER_URL } }
+            - name: MONITORING_URL
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: MONITORING_URL } }
+            - name: GATEWAY_PORT
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: GATEWAY_PORT } }
+            - name: LOG_LEVEL
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: LOG_LEVEL } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: miniredis-dev
+spec:
+  type: ClusterIP
+  selector:
+    app: api-gateway
+  ports:
+    - port: 8080
+      targetPort: 8080

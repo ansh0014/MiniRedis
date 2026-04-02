@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-manager
+  namespace: miniredis-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: node-manager
+  template:
+    metadata:
+      labels:
+        app: node-manager
+    spec:
+      containers:
+        - name: node-manager
+          image: miniredis-node-manager:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 7000
+          securityContext:
+            privileged: true
+          env:
+            - name: DB_HOST
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: POSTGRES_MAIN_HOST } }
+            - name: DB_PORT
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: POSTGRES_MAIN_PORT } }
+            - name: DB_NAME
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: POSTGRES_MAIN_DB } }
+            - name: DB_USER
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: POSTGRES_MAIN_USER } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: miniredis-secrets, key: POSTGRES_MAIN_PASSWORD } }
+            - name: REDIS_PORT_START
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: REDIS_PORT_START } }
+            - name: REDIS_PORT_END
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: REDIS_PORT_END } }
+            - name: REDIS_MAX_MEMORY
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: REDIS_MAX_MEMORY } }
+            - name: REDIS_EVICTION_POLICY
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: REDIS_EVICTION_POLICY } }
+            - name: REDIS_PROTECTED_MODE
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: REDIS_PROTECTED_MODE } }
+            - name: NODE_MANAGER_PORT
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: NODE_MANAGER_PORT } }
+            - name: LOG_LEVEL
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: LOG_LEVEL } }
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+      volumes:
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-manager
+  namespace: miniredis-dev
+spec:
+  type: ClusterIP
+  selector:
+    app: node-manager
+  ports:
+    - port: 7000
+      targetPort: 7000

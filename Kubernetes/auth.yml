@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: miniredis-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-service
+  template:
+    metadata:
+      labels:
+        app: auth-service
+    spec:
+      containers:
+        - name: auth-service
+          image: miniredis-auth:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DB_HOST
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: POSTGRES_AUTH_HOST } }
+            - name: DB_PORT
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: POSTGRES_AUTH_PORT } }
+            - name: DB_NAME
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: POSTGRES_AUTH_DB } }
+            - name: DB_USER
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: POSTGRES_AUTH_USER } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: miniredis-secrets, key: POSTGRES_AUTH_PASSWORD } }
+            - name: FIREBASE_API_KEY
+              valueFrom: { secretKeyRef: { name: miniredis-secrets, key: FIREBASE_API_KEY } }
+            - name: BACKEND_URL
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: BACKEND_URL } }
+            - name: AUTH_SERVICE_PORT
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: AUTH_SERVICE_PORT } }
+            - name: LOG_LEVEL
+              valueFrom: { configMapKeyRef: { name: miniredis-config, key: LOG_LEVEL } }
+          volumeMounts:
+            - name: firebase-sa
+              mountPath: /app/firebase-service-account.json
+              subPath: firebase-service-account.json
+      volumes:
+        - name: firebase-sa
+          secret:
+            secretName: firebase-service-account
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: miniredis-dev
+spec:
+  type: ClusterIP
+  selector:
+    app: auth-service
+  ports:
+    - port: 8000
+      targetPort: 8000
