@@ -187,7 +187,8 @@ Fix:
 - [`deployment.md`](./deployment.md) — Kubernetes/DevOps strategy
 
 ---
-
+# System Design
+![alt text](image.png)
 ## Planned Services
 
 - Pub/Sub service
