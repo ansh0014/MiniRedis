@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: miniredis-config
+  namespace: miniredis-dev
+data:
+  LOG_LEVEL: "info"
+  POSTGRES_MAIN_HOST: "postgres-main"
+  POSTGRES_MAIN_PORT: "5432"
+  POSTGRES_MAIN_DB: "miniredis"
+  POSTGRES_MAIN_USER: "postgres"
+  POSTGRES_AUTH_HOST: "postgres-auth"
+  POSTGRES_AUTH_PORT: "5432"
+  POSTGRES_AUTH_DB: "miniredis_auth"
+  POSTGRES_AUTH_USER: "postgres"
+  NODE_MANAGER_URL: "http://node-manager:7000"
+  BACKEND_URL: "http://backend:5500"
+  AUTH_URL: "http://auth-service:8000"
+  MONITORING_URL: "http://monitoring-service:9000"
+  GATEWAY_PORT: "8080"
+  AUTH_SERVICE_PORT: "8000"
+  METRICS_POLL_INTERVAL: "10"
+  REDIS_PORT_START: "6000"
+  REDIS_PORT_END: "6999"
+  REDIS_MAX_MEMORY: "40mb"
+  REDIS_EVICTION_POLICY: "allkeys-lru"
+  REDIS_PROTECTED_MODE: "no"
+  NODE_MANAGER_PORT: "7000"
