@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
 async function gatewayFetch<T>(
   endpoint: string,
@@ -6,9 +6,9 @@ async function gatewayFetch<T>(
 ): Promise<T> {
   const response = await fetch(`${API_URL}${endpoint}`, {
     ...options,
-    credentials: 'include',
+    credentials: "include",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...options.headers,
     },
   });
@@ -18,13 +18,13 @@ async function gatewayFetch<T>(
     throw new Error(error.error || `API Error: ${response.status}`);
   }
 
-  const contentType = response.headers.get('content-type');
-  if (contentType && contentType.includes('application/json')) {
+  const contentType = response.headers.get("content-type");
+  if (contentType && contentType.includes("application/json")) {
     return response.json();
-  } else {
-    const text = await response.text();
-    return text as T;
   }
+
+  const text = await response.text();
+  return text as T;
 }
 
 export interface User {
@@ -69,34 +69,39 @@ export interface CommandResult {
 }
 
 export const api = {
-  me: () => gatewayFetch<User>('/auth/me'),
-  logout: () => gatewayFetch<void>('/auth/logout', { method: 'POST' }),
+  me: () => gatewayFetch<User>("/auth/me"),
+  logout: () => gatewayFetch<void>("/auth/logout", { method: "POST" }),
 
   createTenant: (name: string, memoryMb: number = 40) =>
-    gatewayFetch<Tenant>('/api/tenants', {
-      method: 'POST',
+    gatewayFetch<Tenant>("/api/tenants", {
+      method: "POST",
       body: JSON.stringify({
         name,
-        memory_limit_mb: memoryMb
+        memory_limit_mb: memoryMb,
       }),
     }),
 
   getTenant: (id: string) => gatewayFetch<Tenant>(`/api/tenants/${id}`),
 
+  deleteTenant: (tenantId: string) =>
+    gatewayFetch<{ success: boolean }>(`/api/tenants/${tenantId}`, {
+      method: "DELETE",
+    }),
+
   createApiKey: (tenantId: string) =>
-    gatewayFetch<ApiKey>('/api/apikeys', {
-      method: 'POST',
+    gatewayFetch<ApiKey>("/api/apikeys", {
+      method: "POST",
       body: JSON.stringify({ tenant_id: tenantId }),
     }),
 
   verifyApiKey: (key: string) =>
-    gatewayFetch<{ tenant_id: string }>(`/api/verify?key=${key}`),
+    gatewayFetch<{ tenant_id: string }>(`/api/verify?key=${encodeURIComponent(key)}`),
 
   revokeApiKey: (key: string) =>
-    gatewayFetch<{ status: string }>(`/api/apikeys/${key}`, { method: 'DELETE' }),
+    gatewayFetch<{ status: string }>(`/api/apikeys/${key}`, { method: "DELETE" }),
 
   listNodes: async (): Promise<RedisNode[]> => {
-    const data = await gatewayFetch<any>('/api/nodes/list');
+    const data = await gatewayFetch<any>("/api/nodes/list");
     if (Array.isArray(data)) return data;
     if (Array.isArray(data?.nodes)) return data.nodes;
     if (Array.isArray(data?.data)) return data.data;
@@ -104,24 +109,22 @@ export const api = {
   },
 
   startNode: (tenantId: string, port: number) =>
-    gatewayFetch<{ success: boolean }>('/api/nodes/start', {
-      method: 'POST',
+    gatewayFetch<{ success: boolean }>("/api/nodes/start", {
+      method: "POST",
       body: JSON.stringify({ tenant_id: tenantId, port }),
     }),
 
   stopNode: (tenantId: string) =>
-    gatewayFetch<{ success: boolean }>('/api/nodes/stop', {
-      method: 'POST',
+    gatewayFetch<{ success: boolean }>("/api/nodes/stop", {
+      method: "POST",
       body: JSON.stringify({ tenant_id: tenantId }),
     }),
 
   executeCommand: (tenantId: string, command: string) =>
-    gatewayFetch<string>('/api/nodes/execute', {
-      method: 'POST',
+    gatewayFetch<string>("/api/nodes/execute", {
+      method: "POST",
       body: JSON.stringify({ tenant_id: tenantId, command }),
-    }).then((result) => {
-      return { result: result as unknown as string };
-    }),
+    }).then((result) => ({ result: result as unknown as string })),
 };
 
 export default api;

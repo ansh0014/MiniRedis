@@ -15,7 +15,6 @@ import (
 	"github.com/gorilla/mux"
 )
 
-
 func getEnv(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -52,11 +51,21 @@ func newProxy(target string) *httputil.ReverseProxy {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin == "http://localhost:5173" || origin == "http://localhost:80" {
+
+		allowed := map[string]bool{
+			"http://localhost":       true,
+			"http://localhost:80":    true,
+			"http://localhost:5173":  true,
+			"http://localhost:8081":  true,
+			"http://miniredis.local": true,
+		}
+
+		if allowed[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
 		}
 
 		if r.Method == http.MethodOptions {
@@ -92,7 +101,6 @@ func checkAuth(w http.ResponseWriter, r *http.Request) bool {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return false
 	}
-
 
 	authReq, err := http.NewRequest("GET", authServiceURL+"/auth/me", nil)
 	if err != nil {
@@ -157,7 +165,6 @@ func getUserId(r *http.Request) (string, error) {
 		return "", http.ErrNoCookie
 	}
 
-	// ✅ Use authServiceURL
 	authReq, _ := http.NewRequest("GET", authServiceURL+"/auth/me", nil)
 	authReq.Header.Set("Cookie", "session_token="+sessionToken)
 
@@ -185,10 +192,50 @@ func getUserId(r *http.Request) (string, error) {
 	return uid, nil
 }
 
+func checkTenantRateLimit(tenantID string) (bool, int, string) {
+	body, _ := json.Marshal(map[string]string{
+		"tenant_id": tenantID,
+	})
+
+	req, err := http.NewRequest("POST", backendServiceURL+"/api/ratelimit/check", bytes.NewBuffer(body))
+	if err != nil {
+		return false, http.StatusInternalServerError, "rate limiter request build failed"
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, http.StatusServiceUnavailable, "rate limiter unavailable"
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return false, http.StatusTooManyRequests, "rate limit exceeded"
+	}
+	if resp.StatusCode != http.StatusOK {
+		return false, http.StatusInternalServerError, "rate limiter check failed"
+	}
+
+	var payload map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return false, http.StatusInternalServerError, "invalid rate limiter response"
+	}
+
+	allowed, ok := payload["allowed"].(bool)
+	if !ok {
+		return false, http.StatusInternalServerError, "rate limiter malformed response"
+	}
+	if !allowed {
+		return false, http.StatusTooManyRequests, "rate limit exceeded"
+	}
+
+	return true, http.StatusOK, ""
+}
+
 func main() {
 	log.SetOutput(io.Discard)
 
-	// ✅ Use service URLs from environment
 	authProxy := newProxy(authServiceURL)
 	backendProxy := newProxy(backendServiceURL)
 	nodeProxy := newProxy(nodeManagerURL)
@@ -277,6 +324,41 @@ func main() {
 
 		nodeProxy.ServeHTTP(w, r)
 	})).Methods("GET", "POST", "DELETE", "OPTIONS")
+
+	r.HandleFunc("/api/nodes/execute", func(w http.ResponseWriter, r *http.Request) {
+		if !checkAuth(w, r) {
+			return
+		}
+
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+			return
+		}
+
+		var payload map[string]interface{}
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+			return
+		}
+
+		tenantID, ok := payload["tenant_id"].(string)
+		if !ok || strings.TrimSpace(tenantID) == "" {
+			http.Error(w, `{"error":"tenant_id is required"}`, http.StatusBadRequest)
+			return
+		}
+
+		allowed, code, msg := checkTenantRateLimit(tenantID)
+		if !allowed {
+			http.Error(w, `{"error":"`+msg+`"}`, code)
+			return
+		}
+
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		r.ContentLength = int64(len(raw))
+		r.URL.Path = "/node/execute"
+		nodeProxy.ServeHTTP(w, r)
+	}).Methods("POST", "OPTIONS")
 
 	registerMonitoringRoutes(r)
 

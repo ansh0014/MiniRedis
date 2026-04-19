@@ -228,6 +228,7 @@ void ApiController::getTenant(const HttpRequestPtr &req, function<void(const Htt
 }
 
 void ApiController::getUserTenants(const HttpRequestPtr &req,
+    
                                    function<void(const HttpResponsePtr &)> &&callback,
                                    const string &firebaseUid)
 {
@@ -544,4 +545,57 @@ void ApiController::checkRateLimit(const HttpRequestPtr &req,
         resp->setStatusCode(k503ServiceUnavailable);
         callback(resp);
     }
+}
+
+void ApiController::deleteTenant(const HttpRequestPtr &req,
+                                 function<void(const HttpResponsePtr &)> &&callback,
+                                 const string &tenantId)
+{
+    auto cb = std::make_shared<std::function<void(const HttpResponsePtr&)>>(std::move(callback));
+
+    auto doDelete = [this, tenantId, cb]() {
+        auto sql = "DELETE FROM tenants WHERE id = $1 RETURNING id::text";
+        db_->execSqlAsync(
+            sql,
+            [cb](const drogon::orm::Result &r) {
+                Json::Value out;
+                auto resp = HttpResponse::newHttpJsonResponse(out);
+
+                if (r.size() == 0) {
+                    out["error"] = "tenant not found";
+                    resp = HttpResponse::newHttpJsonResponse(out);
+                    resp->setStatusCode(k404NotFound);
+                    (*cb)(resp);
+                    return;
+                }
+
+                out["success"] = true;
+                out["tenant_id"] = r[0][0].as<string>();
+                resp = HttpResponse::newHttpJsonResponse(out);
+                (*cb)(resp);
+            },
+            [cb](const drogon::orm::DrogonDbException &e) {
+                Json::Value out;
+                out["error"] = "failed to delete tenant";
+                out["details"] = e.base().what();
+                auto resp = HttpResponse::newHttpJsonResponse(out);
+                resp->setStatusCode(k500InternalServerError);
+                (*cb)(resp);
+            },
+            tenantId);
+    };
+
+    auto nodeClient = HttpClient::newHttpClient("http://node-manager:7000");
+    Json::Value nodeJson;
+    nodeJson["tenant_id"] = tenantId;
+
+    auto nodeReq = HttpRequest::newHttpJsonRequest(nodeJson);
+    nodeReq->setMethod(Post);
+    nodeReq->setPath("/node/stop");
+
+    nodeClient->sendRequest(
+        nodeReq,
+        [doDelete](ReqResult, const HttpResponsePtr &) {
+            doDelete();
+        });
 }

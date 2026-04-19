@@ -84,6 +84,21 @@ export default function Dashboard() {
     }
   };
 
+  const handleDeleteTenant = async (tenantId: string) => {
+    try {
+      const ok = window.confirm(
+        "Delete this tenant permanently? This will free its port and remove all in-memory data."
+      );
+      if (!ok) return;
+
+      await api.deleteTenant(tenantId);
+      toast.success("Tenant deleted and port released");
+      await loadNodes();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to delete tenant");
+    }
+  };
+
   const filteredNodes = nodes.filter((n) => {
     const q = searchTerm.toLowerCase();
     return (
@@ -131,11 +146,11 @@ export default function Dashboard() {
 
         {/* Stat Cards */}
         <div className="grid gap-4 md:grid-cols-3 animate-fade-up animate-delay-100">
-          {[
+          {([
             { label: "Total Instances", value: nodes.length, icon: <Database className="h-4 w-4" />, color: "emerald" },
             { label: "Running", value: runningCount, icon: <Activity className="h-4 w-4" />, color: "green" },
             { label: "Stopped", value: stoppedCount, icon: <Server className="h-4 w-4" />, color: "red" },
-          ].map((stat) => (
+          ]).map((stat) => (
             <div key={stat.label} className="stat-card rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <span className="label-tag">{stat.label}</span>
@@ -231,25 +246,33 @@ export default function Dashboard() {
                       </div>
 
                       <div>
-                        {isRunning ? (
-                          <button
-                            id={`stop-${node.tenant_id}`}
-                            onClick={() => handleStopNode(node.tenant_id)}
-                            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-red-500/25 bg-red-500/8 text-red-400/70 hover:bg-red-500/15 hover:border-red-500/40 hover:text-red-400 transition-all mono text-xs tracking-wider"
-                          >
-                            <Square className="h-3.5 w-3.5" />
-                            STOP
-                          </button>
-                        ) : (
+                        <div className="flex items-center gap-2">
                           <button
                             id={`start-${node.tenant_id}`}
                             onClick={() => handleStartNode(node.tenant_id)}
-                            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-emerald-500/25 bg-emerald-500/8 text-emerald-400/70 hover:bg-emerald-500/15 hover:border-emerald-500/40 hover:text-emerald-400 transition-all mono text-xs tracking-wider"
+                            disabled={isRunning}
+                            className="px-3 py-1.5 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 text-xs disabled:opacity-40 disabled:cursor-not-allowed"
                           >
-                            <Play className="h-3.5 w-3.5" />
                             START
                           </button>
-                        )}
+
+                          <button
+                            id={`stop-${node.tenant_id}`}
+                            onClick={() => handleStopNode(node.tenant_id)}
+                            disabled={!isRunning}
+                            className="px-3 py-1.5 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/30 hover:bg-amber-500/25 text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            STOP
+                          </button>
+
+                          <button
+                            id={`delete-${node.tenant_id}`}
+                            onClick={() => handleDeleteTenant(node.tenant_id)}
+                            className="px-3 py-1.5 rounded-md bg-red-500/15 text-red-300 border border-red-500/30 hover:bg-red-500/25 text-xs"
+                          >
+                            DELETE
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>

@@ -59,19 +59,17 @@ public:
     void stop();
 
 private:
-    // ✅ ADD THIS LINE - Allow NodeManager to access private members
+
     friend class NodeManager;
     
     std::string tenantId_;
     int port_;
     size_t memoryLimitBytes_;
     std::atomic<bool> running_;
-    
-    // In-memory storage (thread-safe)
+
     std::unordered_map<std::string, KVEntry> storage_;
     mutable std::mutex storageMutex_;
-    
-    // TTL sweeper thread (removes expired keys)
+
     std::thread sweeperThread_;
     void ttlSweeperLoop();
     

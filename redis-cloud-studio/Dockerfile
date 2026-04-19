@@ -1,18 +1,19 @@
-# Build stage
-FROM node:18-alpine AS builder
+
+FROM node:18 AS build
 
 WORKDIR /app
 
-# Copy package files
-COPY package.json package-lock.json* ./
-RUN npm ci
+COPY package*.json ./
+RUN npm install
 
-# Copy source code
 COPY . .
+RUN npm run build
 
-# Expose Vite dev server port
-EXPOSE 5173
-ENV VITE_HOST=0.0.0.0
+FROM nginx:alpine
 
-# Run development server
-CMD ["npm", "run", "dev"]
+RUN rm -rf /usr/share/nginx/html/*
+
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
